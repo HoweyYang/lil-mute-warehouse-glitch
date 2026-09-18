@@ -34,7 +34,7 @@ except Exception:
     pickup_mod = None
     HAS_PICKUP = False
 
-APP_VER = "2.1.1"
+APP_VER = "2.1.2"
 APP_NAME = {"zh": "小哑巴 · 卡大仓", "en": "Lil Mute · Warehouse Glitch"}
 APP_SHORT = {"zh": "小哑巴", "en": "Lil Mute"}
 RULE_NAME = "LilMute-BlockOut"
@@ -552,9 +552,13 @@ def set_lang(lang: str) -> str:
     return _LANG
 
 
-def t(name: str, **kwargs) -> str:
-    """取文案。找不到的键回退到中文，再回退到键名本身。"""
-    text = STRINGS.get(_LANG, {}).get(name) or STRINGS["zh"].get(name) or name
+def t(_key: str, **kwargs) -> str:
+    """取文案。找不到的键回退到中文，再回退到键名本身。
+
+    形参刻意叫 _key：调用方会传 name= / key= 之类的占位符，
+    形参名不能和它们撞车（不然又是 TypeError）。
+    """
+    text = STRINGS.get(_LANG, {}).get(_key) or STRINGS["zh"].get(_key) or _key
     return text.format(**kwargs) if kwargs else text
 
 
