@@ -25,7 +25,7 @@ import tkinter as tk
 from ctypes import wintypes
 from tkinter import messagebox, scrolledtext, ttk
 
-APP_VER = "1.2.0"
+APP_VER = "1.3.0"
 APP_NAME = {"zh": "小哑巴 · 卡大仓", "en": "Lil Mute · Warehouse Glitch"}
 APP_SHORT = {"zh": "小哑巴", "en": "Lil Mute"}
 RULE_NAME = "LilMute-BlockOut"
@@ -38,6 +38,8 @@ DEFAULT_CONFIG = {
     "delay": 0.0,
     "hold": 1.5,
     "suspend_seconds": 10,
+    "hotkey_cut": "F8",
+    "hotkey_restore": "F9",
     "accel_block": False,
     "accel_names": (
         "uu.exe,UUGameAssistant.exe,uu_booster.exe,"
@@ -52,8 +54,12 @@ PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 PROCESS_SUSPEND_RESUME = 0x0800
 INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
 WM_HOTKEY = 0x0312
+WM_QUIT = 0x0012
 MOD_NOREPEAT = 0x4000
 VK_F8, VK_F9 = 0x77, 0x78
+
+# 热键表：F1~F12 够用，避免引入键盘钩子
+VK_TABLE = {f"F{i}": 0x6F + i for i in range(1, 13)}
 
 # --------------------------------------------------------------------------
 # 文案 / Strings
@@ -139,8 +145,67 @@ STRINGS = {
         "log_started": "{app} v{ver} 启动（{lang}）",
         "log_admin_ok": "✔ 已获得管理员权限",
         "log_admin_no": "⚠ 未以管理员身份运行：防火墙封禁不可用，可点“以管理员重启”",
-        "log_hotkeys_ok": "✔ 热键已注册：F8 卡 / F9 恢复",
+        "log_hotkeys_ok": "✔ 热键已注册：{cut} 卡 / {restore} 恢复",
+        "log_hotkeys_applied": "✔ 热键已改为：{cut} 卡 / {restore} 恢复",
+        "log_hotkey_bad": "✗ 不认识这个键名：{key}（只支持 F1 ~ F12）",
         "log_hotkey_fail": "⚠ 热键注册失败：{label}（可能被其他程序占用）",
+        "tab_flow": "  流程  ",
+        "sec_hotkeys": "热键（F8/F9 被占用就改这里）",
+        "lbl_hotkey_cut": "卡的键：",
+        "lbl_hotkey_restore": "恢复的键：",
+        "btn_apply_hotkeys": "应用热键",
+        "btn_open_guide": "打开教程 PDF",
+        "btn_copy_fix": "复制清规则命令",
+        "btn_copy_refs": "复制参考链接",
+        "log_copied": "✔ 已复制到剪贴板",
+        "log_guide_missing": "✗ 同目录下没找到 {name}，先把它放到工具旁边",
+        "flow_pre": (
+            "【前置条件 · 游戏里】\n"
+            "1. 身份：注册 CEO（摩托帮 MC 不行，脚本会提示 You are in an MC）\n"
+            "2. 仓库：已买特种货物仓库（你有 4 大仓 + 1 小仓）\n"
+            "3. 位置：人站在你要操作的那个仓库里，否则提示「您不在您当前选择的仓库里!」\n"
+            "4. 货物：仓库里要有货，空仓提示「您的仓库里已经没有板条箱」\n"
+            "5. 战局：先卡单（进程页 → 暂停游戏 10 秒）把其他人清出去\n"
+        ),
+        "flow_gta": (
+            "【GTA 里要先设好的东西】\n"
+            "· 设置 → 显示 → 显示模式：选「无边框窗口」或「窗口」\n"
+            "   独占全屏下部分系统/叠加层会吞掉全局热键，切窗口还会黑屏\n"
+            "· 设置 → 图形：分辨率与桌面一致；别装激进的性能 mod\n"
+            "· 设置 → 按键：确认 F8 / F9 没被占用；占了就改本工具的键（下面）\n"
+            "· 叠加层：Discord / Steam / 加速器的 overlay 建议关，它们会抢热键\n"
+            "· 加速器：用「进程 / 游戏模式」，别开全局代理或 TUN；并把进程名填进网络页\n"
+        ),
+        "flow_buy": (
+            "【取货（进货）】\n"
+            "方式 A（游戏内正规）：CEO 办公室或仓库的电脑 → 购买货物（1 / 2 / 3 箱）\n"
+            "方式 B（菜单脚本）：Stand → Musiness Banager → Special Cargo，面板里有购买/补货相关开关\n"
+            "   （源码里对应 SpecialCargoBuy* 与 BypassBuyCooldown：买货、跳过购买冷却）\n"
+            "· 想全自动循环：加装 BusinessManager Cargo Add-On（自动出售 + 自动补货，可 AFK）\n"
+            "· 大仓满载 111 箱；补货本身也是游戏交易，风险与出货同源\n"
+        ),
+        "flow_sell": (
+            "【出货（卡价卖货）】\n"
+            "1. Stand 菜单（默认热键 INSERT）→ Lua Scripts → Repository → 搜 Musiness Banager 安装\n"
+            "   或手动把 MusinessBanagersource.lua 放进 %appdata%\\Stand\\Lua Scripts\n"
+            "2. 在 Lua Scripts 列表里点它启动 → 出现「生意管理器」面板\n"
+            "3. 进 Special Cargo（特种货物）→ 面板显示各仓库库存：特种货物仓库 {1}: {2}/{3}\n"
+            "4. 选中你要出的那个仓（最多 5 个槽位）\n"
+            "5. 打开 Max Sell Price（最大销售价格，源码默认 6000000）—— 这一步就是「卡价」\n"
+            "6. 点 Sell A Crate（出售一个特种货物板条箱），点一次卖一箱\n"
+            "7. 回游戏看现金 / 银行，到账即完成\n"
+            "原理：脚本改写游戏全局变量（SpecialCargoRewardPerCrate、CrateMultiplier1/2/3）后\n"
+            "走游戏自己的出售流程，属于菜单的内存写入；本工具不参与这一步，也不包含菜单。\n"
+        ),
+        "flow_refs": (
+            "【参考项目 · GitHub】\n"
+            "· calamity-inc/MusinessBanager —— 生意管理器本体（出售/补货/库存监控）\n"
+            "· xhcherry/GTA5-Stand-LuaAIO —— 国内整合包，含 Musiness Banager 与中文翻译\n"
+            "· AnnaThorne/BusinessManager-Cargo-Add-On —— 自动出售 + 自动补货循环\n"
+            "· Perryx-20/cargo-loop-for-dummies —— 极简 cargo loop\n"
+            "· mageangela/QuellGTA —— 断网 / 卡单 / 差传工具\n"
+            "· LBWSIR/LBW-Cheat-Wiki —— 中文菜单文档与赚钱风险说明\n"
+        ),
         "log_busy": "… 上一次卡还没结束，忽略本次",
         "log_delay_wait": "⏳ {delay:g} 秒后执行卡仓",
         "log_blocked": "✔ 已封禁 {name} 的出站流量",
@@ -254,8 +319,69 @@ STRINGS = {
         "log_started": "{app} v{ver} started ({lang})",
         "log_admin_ok": "✔ Administrator rights granted",
         "log_admin_no": "⚠ Not running as administrator: firewall blocking is unavailable, use “Restart as admin”",
-        "log_hotkeys_ok": "✔ Hotkeys registered: F8 cut / F9 restore",
+        "log_hotkeys_ok": "✔ Hotkeys registered: {cut} cut / {restore} restore",
+        "log_hotkeys_applied": "✔ Hotkeys changed to: {cut} cut / {restore} restore",
+        "log_hotkey_bad": "✗ Unknown key name: {key} (F1 ~ F12 only)",
         "log_hotkey_fail": "⚠ Hotkey registration failed: {label} (already in use?)",
+        "tab_flow": "  Workflow  ",
+        "sec_hotkeys": "Hotkeys (change them if F8 / F9 are taken)",
+        "lbl_hotkey_cut": "Cut key:",
+        "lbl_hotkey_restore": "Restore key:",
+        "btn_apply_hotkeys": "Apply",
+        "btn_open_guide": "Open guide PDF",
+        "btn_copy_fix": "Copy cleanup command",
+        "btn_copy_refs": "Copy reference links",
+        "log_copied": "✔ Copied to clipboard",
+        "log_guide_missing": "✗ {name} was not found next to this tool",
+        "flow_pre": (
+            "[Prerequisites - in game]\n"
+            "1. Be a CEO (an MC will not work, the script answers 'You are in an MC!')\n"
+            "2. Own special cargo warehouses\n"
+            "3. Stand inside the warehouse you are going to work on, otherwise the script warns\n"
+            "   ('You are not in your currently selected warehouse!')\n"
+            "4. The warehouse must have crates, otherwise ('no more crates in your warehouse')\n"
+            "5. Isolate the session first: Process tab -> Suspend game for 10 s\n"
+        ),
+        "flow_gta": (
+            "[GTA settings to set first]\n"
+            "- Settings -> Display -> Display mode: 'Borderless Window' or 'Windowed'.\n"
+            "  In exclusive fullscreen some systems/overlays swallow global hotkeys.\n"
+            "- Settings -> Graphics: keep the resolution equal to your desktop; avoid aggressive perf mods.\n"
+            "- Settings -> Key bindings: make sure F8 / F9 are free. If not, change them below.\n"
+            "- Overlays: Discord / Steam / accelerator overlays compete for hotkeys - turn them off.\n"
+            "- Accelerator: use process/game mode, not global proxy or TUN; paste its process name in Network.\n"
+        ),
+        "flow_buy": (
+            "[Restock (buy crates)]\n"
+            "A) In game: the laptop in your CEO office or warehouse -> buy 1 / 2 / 3 crates.\n"
+            "B) Menu script: Stand -> Musiness Banager -> Special Cargo. It also handles buying\n"
+            "   (in the source: SpecialCargoBuy* and BypassBuyCooldown).\n"
+            "- Fully automatic loop: add BusinessManager Cargo Add-On (auto sell + auto resupply, AFK).\n"
+            "- A large warehouse holds 111 crates. Restocking is a game transaction, same risk as selling.\n"
+        ),
+        "flow_sell": (
+            "[Sell (price glitch)]\n"
+            "1. Stand menu (default key INSERT) -> Lua Scripts -> Repository, install 'Musiness Banager'\n"
+            "   or drop MusinessBanagersource.lua into %appdata%\\Stand\\Lua Scripts\n"
+            "2. Start it from the Lua Scripts list\n"
+            "3. Open Special Cargo - the panel lists your warehouses and stock\n"
+            "4. Select the warehouse you want to empty (up to 5 slots)\n"
+            "5. Turn on Max Sell Price (the source defaults to 6000000) - this is the price step\n"
+            "6. Press 'Sell A Crate' - one crate per press\n"
+            "7. Back in game, check cash / bank. Done.\n"
+            "How it works: the script rewrites game globals (SpecialCargoRewardPerCrate,\n"
+            "CrateMultiplier1/2/3) and then runs the game's own sale flow. That is a menu-side memory\n"
+            "write; this tool does not take part in it and ships no menu.\n"
+        ),
+        "flow_refs": (
+            "[Reference projects on GitHub]\n"
+            "- calamity-inc/MusinessBanager - the business manager itself (sell / restock / stock monitor)\n"
+            "- xhcherry/GTA5-Stand-LuaAIO - Chinese all-in-one pack with Musiness Banager\n"
+            "- AnnaThorne/BusinessManager-Cargo-Add-On - automated sell + resupply loop\n"
+            "- Perryx-20/cargo-loop-for-dummies - minimal cargo loop\n"
+            "- mageangela/QuellGTA - network cut / session isolation tool\n"
+            "- LBWSIR/LBW-Cheat-Wiki - Chinese menu docs and money-making risk notes\n"
+        ),
         "log_busy": "… previous cut still running, ignored",
         "log_delay_wait": "⏳ cutting in {delay:g}s",
         "log_blocked": "✔ Blocked outbound traffic of {name}",
@@ -302,9 +428,9 @@ def set_lang(lang: str) -> str:
     return _LANG
 
 
-def t(key: str, **kwargs) -> str:
+def t(name: str, **kwargs) -> str:
     """取文案。找不到的键回退到中文，再回退到键名本身。"""
-    text = STRINGS.get(_LANG, {}).get(key) or STRINGS["zh"].get(key) or key
+    text = STRINGS.get(_LANG, {}).get(name) or STRINGS["zh"].get(name) or name
     return text.format(**kwargs) if kwargs else text
 
 
@@ -353,6 +479,11 @@ ntdll.NtResumeProcess.argtypes = [wintypes.HANDLE]
 ntdll.NtResumeProcess.restype = ctypes.c_long
 user32.RegisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.UINT, wintypes.UINT]
 user32.RegisterHotKey.restype = wintypes.BOOL
+user32.UnregisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int]
+user32.UnregisterHotKey.restype = wintypes.BOOL
+user32.PostThreadMessageW.argtypes = [wintypes.DWORD, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+user32.PostThreadMessageW.restype = wintypes.BOOL
+kernel32.GetCurrentThreadId.restype = wintypes.DWORD
 user32.GetMessageW.argtypes = [
     ctypes.POINTER(wintypes.MSG),
     wintypes.HWND,
@@ -574,6 +705,7 @@ class LilMute(tk.Tk):
         self.hotkey_queue = queue.Queue()
         self.timers = []
         self.busy = threading.Lock()
+        self.hotkey_thread_id = 0
 
         self.geometry("740x620")
         self.minsize(680, 560)
@@ -635,15 +767,18 @@ class LilMute(tk.Tk):
         self.tab_main = ttk.Frame(nb)
         self.tab_net = ttk.Frame(nb)
         self.tab_proc = ttk.Frame(nb)
+        self.tab_flow = ttk.Frame(nb)
         self.tab_log = ttk.Frame(nb)
         nb.add(self.tab_main, text=t("tab_main"))
         nb.add(self.tab_net, text=t("tab_net"))
         nb.add(self.tab_proc, text=t("tab_proc"))
+        nb.add(self.tab_flow, text=t("tab_flow"))
         nb.add(self.tab_log, text=t("tab_log"))
 
         self._build_main_tab()
         self._build_net_tab()
         self._build_proc_tab()
+        self._build_flow_tab()
         self._build_log_tab()
 
         self.status = tk.StringVar(value=t("ready"))
@@ -754,6 +889,42 @@ class LilMute(tk.Tk):
             anchor="e", padx=10, pady=(0, 10)
         )
 
+    def _build_flow_tab(self) -> None:
+        """流程页：把「取货 → 出货」的脚本菜单操作和 GTA 设置放在游戏旁边就能看。"""
+        f = self.tab_flow
+        body = "\n".join((
+            t("flow_pre"), t("flow_gta"), t("flow_buy"), t("flow_sell"), t("flow_refs"),
+        ))
+        self.flow_box = scrolledtext.ScrolledText(
+            f, height=18, font=("Microsoft YaHei UI", 9), wrap="word"
+        )
+        self.flow_box.pack(fill="both", expand=True, padx=10, pady=(8, 4))
+        self.flow_box.insert("end", body)
+        self.flow_box.configure(state="disabled")
+
+        hot = ttk.LabelFrame(f, text=t("sec_hotkeys"), padding=8)
+        hot.pack(fill="x", padx=10, pady=(0, 6))
+        row = ttk.Frame(hot)
+        row.pack(anchor="w")
+        keys = [f"F{i}" for i in range(1, 13)]
+        ttk.Label(row, text=t("lbl_hotkey_cut")).pack(side="left")
+        self.hotkey_cut_var = tk.StringVar(value=self.cfg.get("hotkey_cut", "F8"))
+        ttk.Combobox(row, textvariable=self.hotkey_cut_var, values=keys, width=5,
+                     state="readonly").pack(side="left", padx=(0, 12))
+        ttk.Label(row, text=t("lbl_hotkey_restore")).pack(side="left")
+        self.hotkey_restore_var = tk.StringVar(value=self.cfg.get("hotkey_restore", "F9"))
+        ttk.Combobox(row, textvariable=self.hotkey_restore_var, values=keys, width=5,
+                     state="readonly").pack(side="left", padx=(0, 12))
+        ttk.Button(row, text=t("btn_apply_hotkeys"), command=self.action_apply_hotkeys).pack(side="left")
+
+        btns = ttk.Frame(f)
+        btns.pack(anchor="w", padx=10, pady=(0, 10))
+        ttk.Button(btns, text=t("btn_open_guide"), command=self.action_open_guide).pack(side="left")
+        ttk.Button(btns, text=t("btn_copy_fix"), command=self.action_copy_cleanup).pack(
+            side="left", padx=6
+        )
+        ttk.Button(btns, text=t("btn_copy_refs"), command=self.action_copy_refs).pack(side="left")
+
     # ---------------- 日志 / 状态 ----------------
     def log(self, text: str) -> None:
         line = f"[{time.strftime('%H:%M:%S')}] {text}\n"
@@ -789,6 +960,51 @@ class LilMute(tk.Tk):
         else:
             self.log(t("log_accel_none"))
 
+    def action_apply_hotkeys(self) -> None:
+        cut = str(self.hotkey_cut_var.get()).strip().upper()
+        restore = str(self.hotkey_restore_var.get()).strip().upper()
+        bad = [k for k in (cut, restore) if k not in VK_TABLE]
+        if bad:
+            self.log(t("log_hotkey_bad", key=", ".join(bad)))
+            return
+        self.cfg["hotkey_cut"], self.cfg["hotkey_restore"] = cut, restore
+        save_config(self.cfg)
+        self._start_hotkeys()
+        self.log(t("log_hotkeys_applied", cut=cut, restore=restore))
+
+    def _app_dir(self) -> str:
+        if getattr(sys, "frozen", False):
+            return os.path.dirname(os.path.abspath(sys.executable))
+        return os.path.dirname(os.path.abspath(__file__))
+
+    def action_open_guide(self) -> None:
+        base = self._app_dir()
+        for name in ("lil-mute-guide-zh.pdf", "小哑巴-卡大仓-使用教程.pdf"):
+            path = os.path.join(base, name)
+            if os.path.exists(path):
+                os.startfile(path)  # noqa: S606 - Windows 专用
+                self.log(f"· 打开教程：{name}")
+                return
+        self.log(t("log_guide_missing", name="lil-mute-guide-zh.pdf"))
+
+    def _copy(self, text: str) -> None:
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        self.log(t("log_copied"))
+
+    def action_copy_cleanup(self) -> None:
+        self._copy(f'netsh advfirewall firewall delete rule name="{RULE_NAME}"')
+
+    def action_copy_refs(self) -> None:
+        self._copy("\n".join((
+            "https://github.com/calamity-inc/MusinessBanager",
+            "https://github.com/xhcherry/GTA5-Stand-LuaAIO",
+            "https://github.com/AnnaThorne/BusinessManager-Cargo-Add-On",
+            "https://github.com/Perryx-20/cargo-loop-for-dummies",
+            "https://github.com/mageangela/QuellGTA",
+            "https://github.com/LBWSIR/LBW-Cheat-Wiki",
+        )))
+
     def clear_log(self) -> None:
         self.log_box.configure(state="normal")
         self.log_box.delete("1.0", "end")
@@ -814,14 +1030,31 @@ class LilMute(tk.Tk):
 
     # ---------------- 全局热键 ----------------
     def _start_hotkeys(self) -> None:
+        # 先掐掉上一轮的热键线程：线程退出时系统会自动注销它注册的热键
+        if self.hotkey_thread_id:
+            user32.PostThreadMessageW(self.hotkey_thread_id, WM_QUIT, 0, 0)
+            self.hotkey_thread_id = 0
+            time.sleep(0.35)  # 等旧线程真正退出，避免注册冲突
+
+        cut_key = str(self.cfg.get("hotkey_cut", "F8")).strip().upper()
+        restore_key = str(self.cfg.get("hotkey_restore", "F9")).strip().upper()
+
         def worker():
-            ok = True
-            for hk_id, vk, label in ((1, VK_F8, "F8"), (2, VK_F9, "F9")):
+            self.hotkey_thread_id = int(kernel32.GetCurrentThreadId())
+            failed = []
+            for hk_id, key in ((1, cut_key), (2, restore_key)):
+                vk = VK_TABLE.get(key)
+                if not vk:
+                    self.hotkey_queue.put(("tlog", ("log_hotkey_bad", {"key": key})))
+                    failed.append(key)
+                    continue
                 if not user32.RegisterHotKey(None, hk_id, MOD_NOREPEAT, vk):
-                    ok = False
-                    self.hotkey_queue.put(("tlog", ("log_hotkey_fail", {"label": label})))
-            if ok:
-                self.hotkey_queue.put(("tlog", ("log_hotkeys_ok", {})))
+                    self.hotkey_queue.put(("tlog", ("log_hotkey_fail", {"label": key})))
+                    failed.append(key)
+            if not failed:
+                self.hotkey_queue.put(
+                    ("tlog", ("log_hotkeys_ok", {"cut": cut_key, "restore": restore_key}))
+                )
             msg = wintypes.MSG()
             while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
                 if msg.message == WM_HOTKEY:
