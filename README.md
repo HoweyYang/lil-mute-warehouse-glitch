@@ -5,6 +5,8 @@ automatically. That is the whole idea. Pure OS-level — no injection, no memory
 access, no packet editing. The interface ships in **English and Chinese** and you
 can switch it in-app.
 
+📄 **Step-by-step guide (PDF, Chinese):** [`docs/lil-mute-guide-zh.pdf`](docs/lil-mute-guide-zh.pdf)
+
 ![platform](https://img.shields.io/badge/platform-Windows-blue)
 ![python](https://img.shields.io/badge/python-3.8%2B-informational)
 ![deps](https://img.shields.io/badge/dependencies-none-success)
@@ -150,6 +152,8 @@ does the first one:
 
 一个跑在自己电脑上的 Windows 小工具，把「出货时卡一下」需要的手动操作收进一个带界面的窗口：
 **一键断网 → 定时自动恢复 → 全局热键**。纯系统层实现，不注入游戏。界面支持 **中文 / English** 一键切换。
+
+📄 **一步一步的图文教程（PDF）：** [`docs/lil-mute-guide-zh.pdf`](docs/lil-mute-guide-zh.pdf)
 
 ### 功能
 
