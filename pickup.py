@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
-"""自动取货引擎：音频监听 + 手柄模拟 + 防火墙断网循环。
+"""自动取货引擎：音频监听 + 键盘模拟 + 防火墙断网循环。
 
-思路参考 Hansimov/gtaz（MIT）的自动取货模块，按本程序的结构重写：
-  · 音频：WASAPI 回环采集（soundcard）——不需要装 VBCABLE
-  · 手柄：vgamepad 模拟 X360 手柄——需要 ViGEmBus（已装）
+思路参考 Hansimov/gtaz（MIT）的自动取货模块；菜单路径沿用它的实测结果，
+但把"模拟手柄"换成"模拟键盘"——键盘不用装驱动，也不会和真实手柄抢输入。
+
+  · 音频：WASAPI 回环采集（soundcard），不需要 VBCABLE
+  · 输入：pydirectinput 发送按键（游戏窗口需在前台）
   · 断网：复用主程序的防火墙规则（netsh）
 """
 from __future__ import annotations
@@ -17,41 +19,44 @@ try:
     import soundcard  # noqa: F401
 
     HAS_AUDIO = True
-except Exception:  # 缺依赖时功能降级，不影响主程序
+except Exception:
     HAS_AUDIO = False
 
 try:
-    import vgamepad  # noqa: F401
+    import pydirectinput  # noqa: F401
 
-    HAS_PAD = True
+    HAS_KEYS = True
 except Exception:
-    HAS_PAD = False
+    HAS_KEYS = False
 
-BUTTON_NAMES = {
-    "a": "XUSB_GAMEPAD_A",
-    "b": "XUSB_GAMEPAD_B",
-    "x": "XUSB_GAMEPAD_X",
-    "y": "XUSB_GAMEPAD_Y",
-    "start": "XUSB_GAMEPAD_START",
-    "back": "XUSB_GAMEPAD_BACK",
-    "up": "XUSB_GAMEPAD_DPAD_UP",
-    "down": "XUSB_GAMEPAD_DPAD_DOWN",
-    "left": "XUSB_GAMEPAD_DPAD_LEFT",
-    "right": "XUSB_GAMEPAD_DPAD_RIGHT",
-    "lb": "XUSB_GAMEPAD_LEFT_SHOULDER",
-    "rb": "XUSB_GAMEPAD_RIGHT_SHOULDER",
+# 允许在序列里写的键名（其余单字符按键直接透传）
+NAMED_KEYS = {
+    "esc": "esc",
+    "enter": "enter",
+    "space": "space",
+    "tab": "tab",
+    "backspace": "backspace",
+    "up": "up",
+    "down": "down",
+    "left": "left",
+    "right": "right",
+    "q": "q",
+    "e": "e",
+    "shift": "shift",
+    "ctrl": "ctrl",
 }
 
-# 默认序列：菜单层级会随版本/语言变化，第一次用请按教程校准
+# 默认序列：菜单路径抄自 gtaz 的实测结果，按键按 PC 键盘默认键位写。
+# 不同版本/语言可能要改「按几次、往哪走」，第一次务必在游戏里校准。
 DEFAULT_SEQUENCES = {
-    "to_invite": (
-        "start, wait 2, rb 1, wait 0.5, a, wait 1.5, "
-        "down 1, wait 0.3, a, wait 1.5, a, wait 20"
-    ),
     "to_story": (
-        "start, wait 2, rb 1, wait 0.5, down 1, wait 0.3, a, wait 1, a, wait 12"
+        "esc, wait 2, e, wait 0.6, down 1, wait 0.3, enter, wait 1.2, enter, wait 12"
     ),
-    "confirm": "a, wait 0.8, a, wait 0.8, a",
+    "to_invite": (
+        "esc, wait 2, e, wait 0.6, down 2, wait 0.3, enter, wait 1.5, "
+        "down 2, wait 0.3, enter, wait 20"
+    ),
+    "confirm": "enter, wait 0.8, enter",
 }
 
 
@@ -127,37 +132,19 @@ class AudioMonitor:
         return False
 
 
-class PadController:
-    """vgamepad 封装：按键、序列执行。"""
+class KeyController:
+    """键盘模拟（pydirectinput）。游戏窗口需要在前台。"""
 
-    def __init__(self):
-        self.pad = None
+    def click(self, name: str, duration_ms: int = 80) -> None:
+        import pydirectinput
 
-    def ensure(self):
-        if self.pad is None:
-            import vgamepad as vg
-
-            self.pad = vg.VX360Gamepad()
-            self.pad.reset()
-            self.pad.update()
-        return self.pad
-
-    def click(self, name: str, duration_ms: int = 120) -> None:
-        import vgamepad as vg
-
-        pad = self.ensure()
-        button = getattr(vg.XUSB_BUTTON, BUTTON_NAMES[name])
-        pad.press_button(button)
-        pad.update()
+        key = NAMED_KEYS.get(name, name)
+        pydirectinput.keyDown(key)
         time.sleep(duration_ms / 1000)
-        pad.release_button(button)
-        pad.update()
+        pydirectinput.keyUp(key)
 
-    def run(self, text: str, log=print, stop: threading.Event = None, gap_ms: int = 200) -> bool:
-        """执行一行序列，例如 "start, wait 2, rb 1, a"。
-
-        wait N  = 等 N 秒；<按键> [N] = 点 N 次。
-        """
+    def run(self, text: str, log=print, stop: threading.Event = None, gap_ms: int = 160) -> bool:
+        """执行一行序列，例如 "esc, wait 2, e, down 1, enter"。"""
         for raw in text.replace("\n", ",").split(","):
             token = raw.strip().lower()
             if not token or token.startswith("#"):
@@ -177,7 +164,7 @@ class PadController:
                     stop.wait(number)
                 else:
                     time.sleep(number)
-            elif action in BUTTON_NAMES:
+            elif action in NAMED_KEYS or (len(action) == 1 and action.isalnum()):
                 for _ in range(max(1, int(number))):
                     self.click(action)
                     time.sleep(gap_ms / 1000)
@@ -192,19 +179,18 @@ class PickupEngine:
     """自动取货循环：切模式 → 切战局 → 听声音 → 断网 → 确认 → 恢复。"""
 
     DEFAULTS = {
-        "quiet_wait": 8.0,        # 切完战局后等音频稳定
-        "detect_timeout": 180.0,  # 等信号最长时间
-        "after_detect": 1.0,      # 命中后稍等再断网
-        "warn_wait": 12.0,        # 等「保存失败」提示
-        "goods_wait": 10.0,       # 等货物到达
-        "confirm_gap": 1.0,       # 确认键间隔
+        "quiet_wait": 8.0,
+        "detect_timeout": 180.0,
+        "after_detect": 1.0,
+        "warn_wait": 12.0,
+        "goods_wait": 10.0,
     }
 
     def __init__(self, block, unblock, log):
         self.block = block
         self.unblock = unblock
         self.log = log
-        self.pad = PadController()
+        self.keys = KeyController()
         self.audio = AudioMonitor()
 
     def stop_audio(self) -> None:
@@ -235,17 +221,17 @@ class PickupEngine:
             if stop.is_set():
                 break
             log("=" * 46)
-            log(f"第 {index + 1} / {rounds} 轮")
+            log(f"第 {index + 1} / {rounds} 轮（游戏窗口要保持在前台）")
             log("=" * 46)
 
             self.unblock()
             log("· 切回故事模式……")
-            self.pad.run(sequences.get("to_story", ""), log, stop)
+            self.keys.run(sequences.get("to_story", ""), log, stop)
             if stop.is_set():
                 break
 
             log("· 切到新的邀请战局（员工会把货交进仓库）……")
-            self.pad.run(sequences.get("to_invite", ""), log, stop)
+            self.keys.run(sequences.get("to_invite", ""), log, stop)
             if stop.is_set():
                 break
 
@@ -272,12 +258,12 @@ class PickupEngine:
             log(f"· 等 {cfg['warn_wait']:g} 秒出现「保存失败」提示……")
             if stop.wait(cfg["warn_wait"]):
                 break
-            self.pad.run(sequences.get("confirm", ""), log, stop)
+            self.keys.run(sequences.get("confirm", ""), log, stop)
 
             log(f"· 再等 {cfg['goods_wait']:g} 秒确保货物到达……")
             if stop.wait(cfg["goods_wait"]):
                 break
-            self.pad.run(sequences.get("confirm", ""), log, stop)
+            self.keys.run(sequences.get("confirm", ""), log, stop)
 
             self.unblock()
             log("✔ 已恢复网络，本轮结束")

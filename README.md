@@ -20,7 +20,7 @@ can switch it in-app.
 
 | Feature | Description |
 | --- | --- |
-| **Auto pickup** | Automated warehouse-staff pickup loop: listens to the game audio, cuts the network at the right moment, drives the menus with a virtual gamepad |
+| **Auto pickup** | Automated warehouse-staff pickup loop: listens to the game audio, cuts the network at the right moment, drives the menus with simulated keyboard input |
 | Cut (F8) | Blocks **outbound traffic of the GTA5 process only**, using a Windows Firewall rule |
 | Auto restore | Removes the rule again after the configured number of seconds |
 | Global hotkeys | `F8` to cut, `F9` to restore — both work while the game is fullscreen |
@@ -165,7 +165,7 @@ does the first one:
 
 | 功能 | 说明 |
 | --- | --- |
-| **自动取货** | 员工取货自动化：听游戏声音抓时机 + 自动断网 + 手柄切模式/切战局，循环把大仓取满 |
+| **自动取货** | 员工取货自动化：听游戏声音抓时机 + 自动断网 + 模拟键盘切模式/切战局，循环把大仓取满 |
 | 一键卡（F8） | 用 Windows 防火墙**只封禁 GTA5 进程**的出站流量 |
 | 自动恢复 | 到设定秒数自动解除封禁；也能 F9 或点按钮立刻恢复 |
 | 全局热键 | `F8` 卡 / `F9` 恢复，游戏全屏时同样生效 |

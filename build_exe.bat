@@ -19,7 +19,9 @@ if errorlevel 1 (
 
 echo [*] Building single-file exe...
 python -m PyInstaller --noconfirm --clean --onefile --windowed ^
-    --name LilMute --icon assets\icon.ico lil_mute.py
+    --name LilMute --icon assets\icon.ico ^
+    --hidden-import soundcard --hidden-import pydirectinput ^
+    --collect-all soundcard lil_mute.py
 if errorlevel 1 (
     echo [!] Build failed.
     pause

@@ -29,12 +29,12 @@ from tkinter import filedialog, messagebox, scrolledtext, ttk
 try:
     import pickup as pickup_mod
 
-    HAS_PICKUP = pickup_mod.HAS_AUDIO and pickup_mod.HAS_PAD
+    HAS_PICKUP = pickup_mod.HAS_AUDIO and pickup_mod.HAS_KEYS
 except Exception:
     pickup_mod = None
     HAS_PICKUP = False
 
-APP_VER = "2.0.0"
+APP_VER = "2.1.0"
 APP_NAME = {"zh": "小哑巴 · 卡大仓", "en": "Lil Mute · Warehouse Glitch"}
 APP_SHORT = {"zh": "小哑巴", "en": "Lil Mute"}
 RULE_NAME = "LilMute-BlockOut"
@@ -97,7 +97,8 @@ COLOR_MUTED = "#57606A"
 # --------------------------------------------------------------------------
 STRINGS = {
     "zh": {
-        "tab_main": "  主控 · 卡仓  ",
+        "tab_main": "  手动工具（备用）  ",
+        "tab_manual": "  ② 手动工具（备用）  ",
         "tab_net": "  网络  ",
         "tab_proc": "  进程  ",
         "tab_log": "  日志  ",
@@ -137,8 +138,7 @@ STRINGS = {
         "lbl_accel_dir": "加速器目录：",
         "btn_browse": "浏览",
         "note_accel": (
-            "推荐填加速器安装目录：该目录下正在跑的进程会一起封掉。\n"
-            "进程名是备用方案，填错没有副作用——检测不到就只封游戏。"
+            "填加速器安装目录最省事：该目录下在跑的进程会一起封掉"
         ),
         "log_accel_found": "检测到 {n} 个加速器进程：{list}",
         "log_accel_none": "没检测到配置里的加速器进程（不影响游戏封禁）",
@@ -178,16 +178,17 @@ STRINGS = {
         "log_hotkeys_applied": "✔ 热键已改为：{cut} 卡 / {restore} 恢复",
         "log_hotkey_bad": "✗ 不认识这个键名：{key}（只支持 F1 ~ F12）",
         "log_hotkey_fail": "⚠ 热键注册失败：{label}（可能被其他程序占用）",
-        "tab_flow": "  流程  ",
-        "tab_pickup": "  自动取货  ",
+        "tab_flow": "  说明  ",
+        "tab_pickup": "  ① 自动取货（主功能）  ",
+        "banner": "主功能是「① 自动取货」：挂机把大仓取满。其余页签是手动 / 辅助操作，用不到可以不管。",
         "sec_audio": "音频（WASAPI 回环，不需要虚拟声卡）",
         "lbl_device": "设备：",
         "btn_refresh_devices": "刷新设备",
         "lbl_level": "实时音量：平均 {avg:.0f} / 峰值 {peak:.0f}",
         "btn_test_listen": "测试监听 30 秒",
-        "btn_test_pad": "测试手柄",
-        "log_test_pad_ok": "✔ 虚拟手柄可用（已发送一次 A 键）",
-        "log_test_pad_fail": "✗ 虚拟手柄不可用：{err}",
+        "btn_test_pad": "测试按键",
+        "log_test_pad_ok": "✔ 按键模拟可用（已发送一次 Shift）",
+        "log_test_pad_fail": "✗ 按键模拟不可用：{err}",
         "lbl_thresholds": "触发阈值：",
         "lbl_avg_th": "平均 ≥",
         "lbl_peak_th": "峰值 ≥",
@@ -207,8 +208,8 @@ STRINGS = {
         "log_test_listen": "· 测试监听 30 秒，请让游戏发出那个声音……",
         "log_test_done": "· 测试结束，峰值 {peak:.0f}（阈值 {peak_th:.0f}）",
         "log_seq_help": (
-            "序列写法：wait 秒数 等待；a / b / y / start / back / up / down / left / right / lb / rb 按键，"
-            "后面可跟次数。例如：start, wait 2, rb 1, a, wait 1, down 1, a"
+            "序列写法：wait 秒数 等待；esc / enter / up / down / left / right / q / e / space / tab 等按键，"
+            "后面可跟次数。例如：esc, wait 2, e, down 1, enter。运行时游戏窗口要保持在前台。"
         ),
         "log_pickup_started": "▶ 自动取货开始：等 {wait:g} 分钟，循环 {rounds} 轮",
         "log_pickup_stopped": "■ 自动取货已停止",
@@ -222,6 +223,23 @@ STRINGS = {
         "log_copied": "✔ 已复制到剪贴板",
         "log_guide_missing": "✗ 同目录下没找到 {name}，先把它放到工具旁边",
         "flow_pre": (
+            "【这个插件帮你做什么 / 你要手动做什么】\n"
+            "■ 插件负责（全自动）：\n"
+            "   · 听游戏声音，抓「该断网的那一瞬间」\n"
+            "   · 到时自动断网 → 自动确认「保存失败」弹窗 → 自动恢复网络\n"
+            "   · 用模拟键盘切故事模式、切邀请战局\n"
+            "   · 每一轮写日志；出错会告诉你哪一步不对\n"
+            "■ 你要手动做（只有这些，做完一次就够）：\n"
+            "   1. 关掉游戏加速器（必须）2. 游戏改窗口模式（建议 1024×768）\n"
+            "   3. 声音里关掉「游戏失去焦点时静音」4. 在大仓派员工取货，看到 -$7,500\n"
+            "   5. 出生点设室内（推荐游戏厅）6. 先做一次音频校准 + 按键校准\n"
+            "   7. 启动后别切窗口——GTA 要保持在前台\n"
+            "■ 时间与等待（心里有数，就不会以为卡住了）：\n"
+            "   ·「先等 48 分钟」是给员工取货的时间，这期间工具什么都不做，正常\n"
+            "   · 每轮约 1.5~2 分钟：切故事 12 秒 → 切战局 20 秒 → 音频稳定 8 秒 →\n"
+            "     等信号（最多 3 分钟，没等到就跳过这一轮）→ 断网 → 等 12 秒 → 确认 → 等 10 秒 → 再确认\n"
+            "   · 85 轮大约 2~3 小时，中途不用管；想停就点「停止」，它会先恢复网络\n"
+            "────────────────────────────────────────\n"
             "【第 1 步 · 前置条件（游戏里先弄好）】\n"
             "1. 关掉游戏加速器 —— 防火墙要能真断，加速器会干扰（和手动断网场景相反）\n"
             "2. 设置 → 图像：屏幕类型改「窗口模式」，分辨率建议 1024×768（更稳）\n"
@@ -300,7 +318,8 @@ STRINGS = {
         "st_selftest_done": "自检结束（未修改任何系统设置）",
     },
     "en": {
-        "tab_main": "  Main · Cargo  ",
+        "tab_main": "  Manual tools (fallback)  ",
+        "tab_manual": "  2. Manual tools (fallback)  ",
         "tab_net": "  Network  ",
         "tab_proc": "  Process  ",
         "tab_log": "  Log  ",
@@ -340,8 +359,7 @@ STRINGS = {
         "lbl_accel_dir": "Accelerator folder:",
         "btn_browse": "Browse",
         "note_accel": (
-            "Point it at the accelerator's install folder: every process running from there is cut too.\n"
-            "A wrong name is harmless - if nothing matches, only the game is blocked."
+            "Point it at the accelerator's install folder: every process running from there is cut too"
         ),
         "log_accel_found": "Found {n} accelerator process(es): {list}",
         "log_accel_none": "None of the configured accelerator processes are running (game blocking still works)",
@@ -381,16 +399,20 @@ STRINGS = {
         "log_hotkeys_applied": "✔ Hotkeys changed to: {cut} cut / {restore} restore",
         "log_hotkey_bad": "✗ Unknown key name: {key} (F1 ~ F12 only)",
         "log_hotkey_fail": "⚠ Hotkey registration failed: {label} (already in use?)",
-        "tab_flow": "  Workflow  ",
-        "tab_pickup": "  Auto pickup  ",
+        "tab_flow": "  Guide  ",
+        "tab_pickup": "  1. Auto pickup (main)  ",
+        "banner": (
+            "The main feature is 1. Auto pickup (fills a warehouse while you AFK). "
+            "The other tabs are manual / fallback helpers."
+        ),
         "sec_audio": "Audio (WASAPI loopback - no virtual cable needed)",
         "lbl_device": "Device:",
         "btn_refresh_devices": "Refresh",
         "lbl_level": "Live level: avg {avg:.0f} / peak {peak:.0f}",
         "btn_test_listen": "Test 30 s",
         "btn_test_pad": "Test gamepad",
-        "log_test_pad_ok": "✔ Virtual gamepad works (sent one A press)",
-        "log_test_pad_fail": "✗ Virtual gamepad unavailable: {err}",
+        "log_test_pad_ok": "✔ Keyboard simulation works (sent one Shift)",
+        "log_test_pad_fail": "✗ Keyboard simulation unavailable: {err}",
         "lbl_thresholds": "Trigger:",
         "lbl_avg_th": "avg ≥",
         "lbl_peak_th": "peak ≥",
@@ -410,8 +432,8 @@ STRINGS = {
         "log_test_listen": "· Listening for 30 s - let the game play the cue sound…",
         "log_test_done": "· Test finished, peak {peak:.0f} (threshold {peak_th:.0f})",
         "log_seq_help": (
-            "Sequence syntax: 'wait N' to pause; a / b / y / start / back / up / down / "
-            "left / right / lb / rb to press, with an optional repeat count"
+            "Sequence syntax: 'wait N' to pause; esc / enter / up / down / left / right / q / e / "
+            "space / tab to press, with an optional repeat count. Keep the game window focused."
         ),
         "log_pickup_started": "▶ Auto pickup started: wait {wait:g} min, {rounds} rounds",
         "log_pickup_stopped": "■ Auto pickup stopped",
@@ -425,6 +447,22 @@ STRINGS = {
         "log_copied": "✔ Copied to clipboard",
         "log_guide_missing": "✗ {name} was not found next to this tool",
         "flow_pre": (
+            "[What the plugin does / what you do by hand]\n"
+            "* The plugin handles (fully automatic):\n"
+            "  - listens to the game audio to catch the exact moment\n"
+            "  - cuts the network, confirms the 'save failed' dialog, restores the network\n"
+            "  - switches story mode / invite session with simulated keyboard input\n"
+            "  - logs every round, and tells you which step failed\n"
+            "* You do by hand (once):\n"
+            "  1. accelerator OFF  2. windowed mode (1024x768)  3. 'mute when not in focus' OFF\n"
+            "  4. send warehouse staff out (-$7,500)  5. spawn indoors (arcade)\n"
+            "  6. calibrate audio + keys once  7. keep the game window focused while it runs\n"
+            "* Waiting, so you do not think it froze:\n"
+            "  - 'wait 48 min' is for the staff to come back; the tool idles during it\n"
+            "  - each round ~1.5-2 min: story 12s -> invite 20s -> audio settle 8s ->\n"
+            "    wait for the cue (max 3 min, skipped if missed) -> cut -> 12s -> confirm -> 10s -> confirm\n"
+            "  - 85 rounds take roughly 2-3 hours; press Stop any time to abort safely\n"
+            "----------------------------------------\n"
             "[Step 1 - in-game prerequisites]\n"
             "1. Turn the game accelerator OFF - the firewall must really cut, accelerators interfere\n"
             "2. Settings -> Graphics: screen type 'Windowed', 1024x768 is the most stable\n"
@@ -857,8 +895,13 @@ class LilMute(tk.Tk):
     def _build_ui(self) -> None:
         self.title(f"{APP_NAME[_LANG]} v{APP_VER}")
 
+        tk.Label(
+            self, text=t("banner"), anchor="w", justify="left", wraplength=700,
+            fg="#0B5FFF", font=("Microsoft YaHei UI", 10, "bold"),
+        ).pack(fill="x", padx=10, pady=(8, 0))
+
         top = ttk.Frame(self)
-        top.pack(fill="x", padx=10, pady=(8, 0))
+        top.pack(fill="x", padx=10, pady=(4, 0))
         ttk.Label(top, text=f"{t('lbl_lang')}:").pack(side="left")
         self.lang_box = ttk.Combobox(
             top, values=["中文", "English"], state="readonly", width=10
@@ -870,23 +913,24 @@ class LilMute(tk.Tk):
         nb = ttk.Notebook(self)
         nb.pack(fill="both", expand=True, padx=10, pady=(8, 4))
 
-        self.tab_main = ttk.Frame(nb)
         self.tab_pickup = ttk.Frame(nb)
-        self.tab_net = ttk.Frame(nb)
-        self.tab_proc = ttk.Frame(nb)
+        # "手动断网 / 进程 / 网络" 合并成一页：它们都是手动操作和它的配置，
+        # 分成三页只会让用户分不清和主功能的关系
+        self.tab_manual = ttk.Frame(nb)
+        self.tab_main = self.tab_manual
+        self.tab_net = self.tab_manual
+        self.tab_proc = self.tab_manual
         self.tab_flow = ttk.Frame(nb)
         self.tab_log = ttk.Frame(nb)
-        nb.add(self.tab_main, text=t("tab_main"))
         nb.add(self.tab_pickup, text=t("tab_pickup"))
-        nb.add(self.tab_net, text=t("tab_net"))
-        nb.add(self.tab_proc, text=t("tab_proc"))
+        nb.add(self.tab_manual, text=t("tab_manual"))
         nb.add(self.tab_flow, text=t("tab_flow"))
         nb.add(self.tab_log, text=t("tab_log"))
 
         self._build_main_tab()
-        self._build_pickup_tab()
-        self._build_net_tab()
         self._build_proc_tab()
+        self._build_net_tab()
+        self._build_pickup_tab()
         self._build_flow_tab()
         self._build_log_tab()
 
@@ -935,9 +979,6 @@ class LilMute(tk.Tk):
             side="left", expand=True, fill="x", padx=(6, 0)
         )
 
-        hint = ttk.LabelFrame(f, text=t("sec_notes"), padding=10)
-        hint.pack(fill="both", expand=True, padx=10, pady=(0, 10))
-        ttk.Label(hint, text=t("note_main"), justify="left").pack(anchor="w")
 
     def _build_pickup_tab(self) -> None:
         f = self.tab_pickup
@@ -1102,9 +1143,6 @@ class LilMute(tk.Tk):
         row2.pack(anchor="w", pady=(10, 0))
         ttk.Button(row2, text=t("btn_kill"), command=self.action_kill).pack(side="left")
 
-        tip = ttk.LabelFrame(f, text=t("sec_notes"), padding=10)
-        tip.pack(fill="both", expand=True, padx=10, pady=(0, 10))
-        ttk.Label(tip, text=t("note_proc"), justify="left").pack(anchor="w")
 
     def _build_log_tab(self) -> None:
         f = self.tab_log
@@ -1320,8 +1358,7 @@ class LilMute(tk.Tk):
             self.log(t("log_pickup_nodep"))
             return
         try:
-            pad = pickup_mod.PadController()
-            pad.click("a")
+            pickup_mod.KeyController().click("shift")
             self.log(t("log_test_pad_ok"))
         except Exception as exc:
             self.log(t("log_test_pad_fail", err=exc))
@@ -1689,11 +1726,10 @@ def main() -> int:
         try:
             import pickup as pm
 
-            lines.append(f"HAS_AUDIO={pm.HAS_AUDIO} HAS_PAD={pm.HAS_PAD}")
+            lines.append(f"HAS_AUDIO={pm.HAS_AUDIO} HAS_KEYS={pm.HAS_KEYS}")
             lines.append("devices=" + " | ".join(pm.AudioMonitor.list_devices()))
-            pad = pm.PadController()
-            pad.ensure()
-            lines.append("gamepad=OK")
+            pm.KeyController().click("shift")
+            lines.append("keyboard=OK")
         except Exception as exc:
             lines.append(f"ERROR: {exc!r}")
         with open(os.path.join(app_dir(), "pickup-selftest.txt"), "w", encoding="utf-8") as handle:
