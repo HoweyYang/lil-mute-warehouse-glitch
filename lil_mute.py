@@ -34,7 +34,7 @@ except Exception:
     pickup_mod = None
     HAS_PICKUP = False
 
-APP_VER = "2.1.0"
+APP_VER = "2.1.1"
 APP_NAME = {"zh": "小哑巴 · 卡大仓", "en": "Lil Mute · Warehouse Glitch"}
 APP_SHORT = {"zh": "小哑巴", "en": "Lil Mute"}
 RULE_NAME = "LilMute-BlockOut"
@@ -133,6 +133,7 @@ STRINGS = {
         "btn_elevate": "以管理员重启",
         "sec_accel": "加速器（可选）",
         "chk_accel": "卡的时候把加速器进程也一起封禁",
+        "chk_advanced": "显示高级选项（加速器封禁 —— 只有手动断网时才需要）",
         "lbl_accel_names": "加速器进程名（逗号分隔）：",
         "btn_accel_scan": "检测进程",
         "lbl_accel_dir": "加速器目录：",
@@ -354,6 +355,7 @@ STRINGS = {
         "btn_elevate": "Restart as admin",
         "sec_accel": "Game accelerator (optional)",
         "chk_accel": "Block the accelerator processes as well when cutting",
+        "chk_advanced": "Show advanced options (accelerator blocking - only needed for a manual cut)",
         "lbl_accel_names": "Accelerator process names (comma separated):",
         "btn_accel_scan": "Detect",
         "lbl_accel_dir": "Accelerator folder:",
@@ -851,8 +853,8 @@ class LilMute(tk.Tk):
         self.pickup_stop = None
         self.audio_test_running = False
 
-        self.geometry("740x620")
-        self.minsize(680, 560)
+        self.geometry("780x800")
+        self.minsize(700, 660)
         self._build_style()
         self._build_ui()
         self._start_hotkeys()
@@ -968,7 +970,6 @@ class LilMute(tk.Tk):
         ttk.Entry(row, textvariable=self.delay_var, width=6).pack(side="left")
         ttk.Label(row, text=t("lbl_hold")).pack(side="left")
         ttk.Entry(row, textvariable=self.hold_var, width=6).pack(side="left")
-        ttk.Label(param, text=t("hint_flow"), foreground="#555555").pack(anchor="w", pady=(8, 0))
 
         act = ttk.Frame(f)
         act.pack(fill="x", padx=10, pady=14)
@@ -1084,8 +1085,15 @@ class LilMute(tk.Tk):
         self.admin_btn = ttk.Button(btns, text=t("btn_elevate"), command=self.do_elevate)
         self.admin_btn.pack(side="left", padx=6)
 
+        # 加速器封禁与自动取货是矛盾的（自动取货要求关加速器），默认收进"高级选项"
+        self.adv_var = tk.BooleanVar(value=False)
+        self.adv_chk = ttk.Checkbutton(
+            f, text=t("chk_advanced"), variable=self.adv_var, command=self._toggle_advanced
+        )
+        self.adv_chk.pack(anchor="w", padx=10, pady=(0, 6))
+
         accel = ttk.LabelFrame(f, text=t("sec_accel"), padding=10)
-        accel.pack(fill="x", padx=10, pady=(0, 8))
+        self.accel_frame = accel
         self.accel_chk_var = tk.BooleanVar(value=bool(self.cfg.get("accel_block")))
         ttk.Checkbutton(
             accel, text=t("chk_accel"), variable=self.accel_chk_var, command=self._save_accel
@@ -1212,6 +1220,18 @@ class LilMute(tk.Tk):
         save_config(self.cfg)
         try:
             self.refresh_state()
+        except Exception:
+            pass
+
+    def _toggle_advanced(self) -> None:
+        """高级选项：加速器封禁默认收起来，勾上才显示。"""
+        try:
+            if self.adv_var.get():
+                self.accel_frame.pack(
+                    fill="x", padx=10, pady=(0, 8), after=self.adv_chk
+                )
+            else:
+                self.accel_frame.pack_forget()
         except Exception:
             pass
 
