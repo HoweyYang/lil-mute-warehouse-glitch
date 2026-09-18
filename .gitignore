@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+config.json
+katool_config.json
+build/
+dist/
+*.spec
