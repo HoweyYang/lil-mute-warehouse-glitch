@@ -25,14 +25,25 @@ import tkinter as tk
 from ctypes import wintypes
 from tkinter import messagebox, scrolledtext, ttk
 
-APP_VER = "1.1.0"
+APP_VER = "1.2.0"
 APP_NAME = {"zh": "小哑巴 · 卡大仓", "en": "Lil Mute · Warehouse Glitch"}
 APP_SHORT = {"zh": "小哑巴", "en": "Lil Mute"}
 RULE_NAME = "LilMute-BlockOut"
+RULE_PREFIX = "LilMute-"
 GAME_EXE_NAMES = ("GTA5.exe", "GTA5_Enhanced.exe")
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 
-DEFAULT_CONFIG = {"lang": "", "delay": 0.0, "hold": 1.5, "suspend_seconds": 10}
+DEFAULT_CONFIG = {
+    "lang": "",
+    "delay": 0.0,
+    "hold": 1.5,
+    "suspend_seconds": 10,
+    "accel_block": False,
+    "accel_names": (
+        "uu.exe,UUGameAssistant.exe,uu_booster.exe,"
+        "XunyouClient.exe,XunyouAcc.exe,QiyouBox.exe,qiyou.exe,LeiShen.exe"
+    ),
+}
 
 CREATE_NO_WINDOW = 0x08000000
 MAX_PATH = 260
@@ -83,6 +94,21 @@ STRINGS = {
         "btn_unblock": "解除封禁",
         "btn_refresh": "刷新",
         "btn_elevate": "以管理员重启",
+        "sec_accel": "加速器（可选）",
+        "chk_accel": "卡的时候把加速器进程也一起封禁",
+        "lbl_accel_names": "加速器进程名（逗号分隔）：",
+        "btn_accel_scan": "检测进程",
+        "note_accel": (
+            "· 加速器是驱动级接管游戏流量，只封游戏进程有时不管用；勾上这个，F8 会把加速器进程\n"
+            "   也一起封掉，断网更彻底。\n"
+            "· 进程名去任务管理器里看（右键加速器 → 打开文件位置），填进来即可。\n"
+            "· 名字填错没有副作用：检测不到就只封游戏。"
+        ),
+        "log_accel_found": "检测到 {n} 个加速器进程：{list}",
+        "log_accel_none": "没检测到配置里的加速器进程（不影响游戏封禁）",
+        "log_accel_blocked": "✔ 同时封禁了 {n} 个加速器进程",
+        "log_accel_skipped": "· 未检测到加速器进程，只封了游戏",
+        "log_accel_fail": "⚠ 加速器进程封禁失败：{name}",
         "note_net": (
             "· 需要管理员权限；规则名固定为：\n"
             "   {rule}\n"
@@ -183,6 +209,21 @@ STRINGS = {
         "btn_unblock": "Unblock",
         "btn_refresh": "Refresh",
         "btn_elevate": "Restart as admin",
+        "sec_accel": "Game accelerator (optional)",
+        "chk_accel": "Block the accelerator processes as well when cutting",
+        "lbl_accel_names": "Accelerator process names (comma separated):",
+        "btn_accel_scan": "Detect",
+        "note_accel": (
+            "· Accelerators take over the game's traffic at driver level, so blocking only the game\n"
+            "   process sometimes does nothing. Tick this and F8 will block the accelerator too.\n"
+            "· Get the process name from Task Manager (Details tab) and paste it here.\n"
+            "· A wrong name is harmless: if nothing matches, only the game is blocked."
+        ),
+        "log_accel_found": "Found {n} accelerator process(es): {list}",
+        "log_accel_none": "None of the configured accelerator processes are running (game blocking still works)",
+        "log_accel_blocked": "✔ Also blocked {n} accelerator process(es)",
+        "log_accel_skipped": "· No accelerator process found, blocked the game only",
+        "log_accel_fail": "⚠ Failed to block accelerator process: {name}",
         "note_net": (
             "· Requires administrator rights. Rule name is fixed:\n"
             "   {rule}\n"
@@ -441,23 +482,60 @@ def resume_process(pid: int) -> bool:
 # --------------------------------------------------------------------------
 # 防火墙 / Firewall（按程序出站封禁）
 # --------------------------------------------------------------------------
+def list_own_rules() -> list:
+    """列出本工具建的所有出站规则（含加速器那几条），用于彻底清理。"""
+    code, out = run_hidden("netsh advfirewall firewall show rule name=all dir=out")
+    if code != 0:
+        return []
+    names = []
+    for line in out.splitlines():
+        for label in ("Rule Name", "规则名称"):
+            if line.strip().startswith(label):
+                value = line.split(":", 1)[-1].strip()
+                if value.startswith(RULE_PREFIX):
+                    names.append(value)
+    return names
+
+
+def find_processes_by_names(names) -> list:
+    """按进程名找进程（不区分大小写），返回 [(pid, name, path)]。"""
+    wanted = {n.strip().lower() for n in names if n and n.strip()}
+    if not wanted:
+        return []
+    found = []
+    for pid, name in iter_processes():
+        if name.lower() in wanted:
+            path = process_path(pid)
+            if path:
+                found.append((pid, name, path))
+    return found
+
+
+def accel_rule_name(process_name: str) -> str:
+    return RULE_PREFIX + "Accel-" + os.path.splitext(process_name)[0]
+
+
 def fw_is_blocked() -> bool:
     code, _ = run_hidden(f'netsh advfirewall firewall show rule name="{RULE_NAME}"')
     return code == 0
 
 
-def fw_block(program_path: str):
-    fw_unblock()
+def fw_block(program_path: str, rule_name: str = RULE_NAME):
+    run_hidden(f'netsh advfirewall firewall delete rule name="{rule_name}"')
     code, out = run_hidden(
-        f'netsh advfirewall firewall add rule name="{RULE_NAME}" dir=out '
+        f'netsh advfirewall firewall add rule name="{rule_name}" dir=out '
         f'program="{program_path}" action=block enable=yes profile=any'
     )
     return code == 0, out.strip()
 
 
 def fw_unblock() -> bool:
-    code, _ = run_hidden(f'netsh advfirewall firewall delete rule name="{RULE_NAME}"')
-    return code == 0
+    """删掉本工具建的所有规则（游戏那条 + 加速器那几条）。"""
+    removed = False
+    for name in set(list_own_rules()) | {RULE_NAME}:
+        code, _ = run_hidden(f'netsh advfirewall firewall delete rule name="{name}"')
+        removed = removed or code == 0
+    return removed
 
 
 # --------------------------------------------------------------------------
@@ -625,6 +703,22 @@ class LilMute(tk.Tk):
         self.admin_btn = ttk.Button(btns, text=t("btn_elevate"), command=self.do_elevate)
         self.admin_btn.pack(side="left", padx=6)
 
+        accel = ttk.LabelFrame(f, text=t("sec_accel"), padding=10)
+        accel.pack(fill="x", padx=10, pady=(0, 8))
+        self.accel_chk_var = tk.BooleanVar(value=bool(self.cfg.get("accel_block")))
+        ttk.Checkbutton(
+            accel, text=t("chk_accel"), variable=self.accel_chk_var, command=self._save_accel
+        ).pack(anchor="w")
+        row = ttk.Frame(accel)
+        row.pack(fill="x", pady=(6, 0))
+        ttk.Label(row, text=t("lbl_accel_names")).pack(side="left")
+        self.accel_names_var = tk.StringVar(value=self.cfg.get("accel_names", ""))
+        ttk.Entry(row, textvariable=self.accel_names_var).pack(
+            side="left", fill="x", expand=True, padx=6
+        )
+        ttk.Button(row, text=t("btn_accel_scan"), command=self.action_scan_accel).pack(side="left")
+        ttk.Label(accel, text=t("note_accel"), justify="left").pack(anchor="w", pady=(6, 0))
+
         tip = ttk.LabelFrame(f, text=t("sec_notes"), padding=10)
         tip.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         ttk.Label(tip, text=t("note_net", rule=RULE_NAME), justify="left").pack(anchor="w")
@@ -671,6 +765,30 @@ class LilMute(tk.Tk):
         except tk.TclError:
             pass
 
+    def log_async(self, text: str) -> None:
+        """从后台线程写日志：丢进队列，由主线程落笔，避免跨线程操作 Tk。"""
+        self.hotkey_queue.put(("log", text))
+
+    def _save_accel(self) -> None:
+        self.cfg["accel_block"] = bool(self.accel_chk_var.get())
+        self.cfg["accel_names"] = self.accel_names_var.get().strip()
+        save_config(self.cfg)
+
+    def _accel_names(self) -> list:
+        return [n.strip() for n in str(self.accel_names_var.get()).split(",") if n.strip()]
+
+    def action_scan_accel(self) -> None:
+        self._save_accel()
+        found = find_processes_by_names(self._accel_names())
+        if found:
+            self.log(t(
+                "log_accel_found",
+                n=len(found),
+                list=", ".join(f"{name} (PID {pid})" for pid, name, _ in found),
+            ))
+        else:
+            self.log(t("log_accel_none"))
+
     def clear_log(self) -> None:
         self.log_box.configure(state="normal")
         self.log_box.delete("1.0", "end")
@@ -701,9 +819,9 @@ class LilMute(tk.Tk):
             for hk_id, vk, label in ((1, VK_F8, "F8"), (2, VK_F9, "F9")):
                 if not user32.RegisterHotKey(None, hk_id, MOD_NOREPEAT, vk):
                     ok = False
-                    self.hotkey_queue.put(("log", ("log_hotkey_fail", {"label": label})))
+                    self.hotkey_queue.put(("tlog", ("log_hotkey_fail", {"label": label})))
             if ok:
-                self.hotkey_queue.put(("log", ("log_hotkeys_ok", {})))
+                self.hotkey_queue.put(("tlog", ("log_hotkeys_ok", {})))
             msg = wintypes.MSG()
             while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
                 if msg.message == WM_HOTKEY:
@@ -717,11 +835,17 @@ class LilMute(tk.Tk):
                 kind, payload = self.hotkey_queue.get_nowait()
                 if kind == "hotkey":
                     self.action_ka() if payload == 1 else self.action_restore()
-                else:
+                elif kind == "tlog":
                     key, kwargs = payload
                     self.log(t(key, **kwargs))
+                elif kind == "log":
+                    self.log(str(payload))
+                elif kind == "call":
+                    payload()
         except queue.Empty:
             pass
+        except Exception as exc:  # 队列里的动作出错也不能让界面停摆
+            self.log(f"✗ {exc}")
         self.after(150, self._pump)
 
     # ---------------- 动作 ----------------
@@ -737,7 +861,8 @@ class LilMute(tk.Tk):
         self.timers.clear()
 
     def _schedule(self, seconds: float, func) -> None:
-        timer = threading.Timer(seconds, func)
+        # 定时回调统一回到主线程执行，避免后台线程直接操作 Tk
+        timer = threading.Timer(seconds, lambda: self.hotkey_queue.put(("call", func)))
         timer.daemon = True
         self.timers.append(timer)
         timer.start()
@@ -764,6 +889,15 @@ class LilMute(tk.Tk):
             self.set_status(t("status_fail_fw"))
             return False
         self.log(t("log_blocked", name=name))
+        if self.cfg.get("accel_block"):
+            blocked = 0
+            for _apid, aname, apath in find_processes_by_names(self._accel_names()):
+                ok_accel, _ = fw_block(apath, accel_rule_name(aname))
+                if ok_accel:
+                    blocked += 1
+                else:
+                    self.log(t("log_accel_fail", name=aname))
+            self.log(t("log_accel_blocked", n=blocked) if blocked else t("log_accel_skipped"))
         self.set_status(t("status_cut"))
         self.refresh_state()
         if hold is not None:
@@ -783,9 +917,9 @@ class LilMute(tk.Tk):
         def worker():
             try:
                 if delay > 0:
-                    self.log(t("log_delay_wait", delay=delay))
+                    self.log_async(t("log_delay_wait", delay=delay))
                     time.sleep(delay)
-                self.do_block(hold)
+                self.hotkey_queue.put(("call", lambda: self.do_block(hold)))
             finally:
                 self.busy.release()
 
