@@ -26,7 +26,15 @@ import tkinter as tk
 from ctypes import wintypes
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
-APP_VER = "1.4.0"
+try:
+    import pickup as pickup_mod
+
+    HAS_PICKUP = pickup_mod.HAS_AUDIO and pickup_mod.HAS_PAD
+except Exception:
+    pickup_mod = None
+    HAS_PICKUP = False
+
+APP_VER = "2.0.0"
 APP_NAME = {"zh": "小哑巴 · 卡大仓", "en": "Lil Mute · Warehouse Glitch"}
 APP_SHORT = {"zh": "小哑巴", "en": "Lil Mute"}
 RULE_NAME = "LilMute-BlockOut"
@@ -56,6 +64,14 @@ DEFAULT_CONFIG = {
         "uu.exe,UUGameAssistant.exe,uu_booster.exe,"
         "XunyouClient.exe,XunyouAcc.exe,QiyouBox.exe,qiyou.exe,LeiShen.exe"
     ),
+    "pickup_device": "",
+    "pickup_avg": 25.0,
+    "pickup_peak": 45.0,
+    "pickup_rounds": 85,
+    "pickup_wait_min": 48.0,
+    "seq_to_story": "",
+    "seq_to_invite": "",
+    "seq_confirm": "",
 }
 
 CREATE_NO_WINDOW = 0x08000000
@@ -163,6 +179,39 @@ STRINGS = {
         "log_hotkey_bad": "✗ 不认识这个键名：{key}（只支持 F1 ~ F12）",
         "log_hotkey_fail": "⚠ 热键注册失败：{label}（可能被其他程序占用）",
         "tab_flow": "  流程  ",
+        "tab_pickup": "  自动取货  ",
+        "sec_audio": "音频（WASAPI 回环，不需要虚拟声卡）",
+        "lbl_device": "设备：",
+        "btn_refresh_devices": "刷新设备",
+        "lbl_level": "实时音量：平均 {avg:.0f} / 峰值 {peak:.0f}",
+        "btn_test_listen": "测试监听 30 秒",
+        "btn_test_pad": "测试手柄",
+        "log_test_pad_ok": "✔ 虚拟手柄可用（已发送一次 A 键）",
+        "log_test_pad_fail": "✗ 虚拟手柄不可用：{err}",
+        "lbl_thresholds": "触发阈值：",
+        "lbl_avg_th": "平均 ≥",
+        "lbl_peak_th": "峰值 ≥",
+        "sec_loop": "循环参数",
+        "lbl_wait_min": "先等（分钟）：",
+        "lbl_rounds": "循环次数：",
+        "sec_seq": "按键序列（第一次用必须在游戏里校准）",
+        "lbl_seq_story": "切故事：",
+        "lbl_seq_invite": "切邀请战局：",
+        "lbl_seq_confirm": "确认弹窗：",
+        "btn_seq_default": "恢复默认序列",
+        "btn_start_pickup": "开始自动取货",
+        "btn_stop_pickup": "停止",
+        "st_pickup_idle": "就绪",
+        "st_pickup_running": "运行中：第 {i}/{n} 轮",
+        "log_pickup_nodep": "✗ 缺少依赖（soundcard / numpy / vgamepad），自动取货不可用",
+        "log_test_listen": "· 测试监听 30 秒，请让游戏发出那个声音……",
+        "log_test_done": "· 测试结束，峰值 {peak:.0f}（阈值 {peak_th:.0f}）",
+        "log_seq_help": (
+            "序列写法：wait 秒数 等待；a / b / y / start / back / up / down / left / right / lb / rb 按键，"
+            "后面可跟次数。例如：start, wait 2, rb 1, a, wait 1, down 1, a"
+        ),
+        "log_pickup_started": "▶ 自动取货开始：等 {wait:g} 分钟，循环 {rounds} 轮",
+        "log_pickup_stopped": "■ 自动取货已停止",
         "sec_hotkeys": "热键（F8/F9 被占用就改这里）",
         "lbl_hotkey_cut": "卡的键：",
         "lbl_hotkey_restore": "恢复的键：",
@@ -173,51 +222,49 @@ STRINGS = {
         "log_copied": "✔ 已复制到剪贴板",
         "log_guide_missing": "✗ 同目录下没找到 {name}，先把它放到工具旁边",
         "flow_pre": (
-            "【前置条件 · 游戏里】\n"
-            "1. 身份：注册 CEO（摩托帮 MC 不行，脚本会提示 You are in an MC）\n"
-            "2. 仓库：已买特种货物仓库（你有 4 大仓 + 1 小仓）\n"
-            "3. 位置：人站在你要操作的那个仓库里，否则提示「您不在您当前选择的仓库里!」\n"
-            "4. 货物：仓库里要有货，空仓提示「您的仓库里已经没有板条箱」\n"
-            "5. 战局：先卡单（进程页 → 暂停游戏 10 秒）把其他人清出去\n"
+            "【第 1 步 · 前置条件（游戏里先弄好）】\n"
+            "1. 关掉游戏加速器 —— 防火墙要能真断，加速器会干扰（和手动断网场景相反）\n"
+            "2. 设置 → 图像：屏幕类型改「窗口模式」，分辨率建议 1024×768（更稳）\n"
+            "3. 设置 → 声音：把「游戏失去焦点时静音」改成关闭（要在后台听声音）\n"
+            "4. 大仓里派员工出去取货：一定要看到 -$7,500，并且员工已离开仓库\n"
+            "   派了哪几个仓，就只给这几个仓取货\n"
+            "5. 出生点设室内（推荐游戏厅，能在大屏看大仓库存）；别选机库、别选带浴室的地点\n"
+            "6. 本工具用管理员身份运行（改防火墙需要）\n"
         ),
         "flow_gta": (
-            "【GTA 里要先设好的东西】\n"
-            "· 设置 → 显示 → 显示模式：选「无边框窗口」或「窗口」\n"
-            "   独占全屏下部分系统/叠加层会吞掉全局热键，切窗口还会黑屏\n"
-            "· 设置 → 图形：分辨率与桌面一致；别装激进的性能 mod\n"
-            "· 设置 → 按键：确认 F8 / F9 没被占用；占了就改本工具的键（下面）\n"
-            "· 叠加层：Discord / Steam / 加速器的 overlay 建议关，它们会抢热键\n"
-            "· 加速器：用「进程 / 游戏模式」，别开全局代理或 TUN；并在网络页填它的安装目录\n"
+            "【这个「卡」到底卡的是什么】\n"
+            "正常玩法：花 $7,500 派员工取货 → 等 48 分钟 → 带回 1~3 箱。大仓满仓 111 箱，\n"
+            "正常要跑几十趟、几十小时。\n"
+            "卡法：员工取货回来、游戏要写存档的那一刻切断网络（游戏会提示「保存失败」），\n"
+            "货物已经进仓，这次却不算数 → 马上再切一次战局重复，大仓很快就满了。\n"
+            "工具干的事只有三件：模拟手柄按键（切模式/切战局/确认）+ 听声音抓时机 + 开关防火墙。\n"
+            "不注入、不读内存、不改数据包。\n"
         ),
         "flow_buy": (
-            "【取货（进货）】\n"
-            "方式 A（游戏内正规）：CEO 办公室或仓库的电脑 → 购买货物（1 / 2 / 3 箱）\n"
-            "方式 B（菜单脚本）：Stand → Musiness Banager → Special Cargo，面板里有购买/补货相关开关\n"
-            "   （源码里对应 SpecialCargoBuy* 与 BypassBuyCooldown：买货、跳过购买冷却）\n"
-            "· 想全自动循环：加装 BusinessManager Cargo Add-On（自动出售 + 自动补货，可 AFK）\n"
-            "· 大仓满载 111 箱；补货本身也是游戏交易，风险与出货同源\n"
+            "【第 2 步 · 校准音频】（自动取货页上半部分）\n"
+            "1. 设备：选游戏声音输出的那个设备（列出来的都是可回环录制的）\n"
+            "2. 点「测试监听 30 秒」→ 让游戏发出那个声音（进入战局/员工交货的音效）\n"
+            "   看「实时音量」的峰值跳到多少；不跳就换一个设备再试\n"
+            "3. 把阈值定在「峰值跳起来时的一半左右」，例如峰值 60 → 阈值 平均 25 / 峰值 45\n"
+            "4. 嫌麻烦就先用默认 25 / 45，跑一轮看日志再调\n"
         ),
         "flow_sell": (
-            "【出货（卡价卖货）】\n"
-            "1. Stand 菜单（默认热键 INSERT）→ Lua Scripts → Repository → 搜 Musiness Banager 安装\n"
-            "   或手动把 MusinessBanagersource.lua 放进 %appdata%\\Stand\\Lua Scripts\n"
-            "2. 在 Lua Scripts 列表里点它启动 → 出现「生意管理器」面板\n"
-            "3. 进 Special Cargo（特种货物）→ 面板显示各仓库库存：特种货物仓库 {1}: {2}/{3}\n"
-            "4. 选中你要出的那个仓（最多 5 个槽位）\n"
-            "5. 打开 Max Sell Price（最大销售价格，源码默认 6000000）—— 这一步就是「卡价」\n"
-            "6. 点 Sell A Crate（出售一个特种货物板条箱），点一次卖一箱\n"
-            "7. 回游戏看现金 / 银行，到账即完成\n"
-            "原理：脚本改写游戏全局变量（SpecialCargoRewardPerCrate、CrateMultiplier1/2/3）后\n"
-            "走游戏自己的出售流程，属于菜单的内存写入；本工具不参与这一步，也不包含菜单。\n"
+            "【第 3 步 · 校准按键序列】（自动取货页下半部分）\n"
+            "序列写法：wait 秒数 = 等待；a / b / y / start / back / up / down / left / right / lb / rb = 按键，\n"
+            "后面可以跟次数。例：start, wait 2, rb 1, a, wait 1, down 1, a\n"
+            "· 切故事 / 切邀请战局 / 确认弹窗 三条都要在你的游戏里试一次\n"
+            "· 试法：先手动把游戏切到对应界面，点「开始自动取货」看它按得对不对，不对就改序列再试\n"
+            "· 默认序列是按中文版菜单写的起点，不同版本/语言可能要改「按几次、往哪走」\n"
         ),
         "flow_refs": (
-            "【参考项目 · GitHub】\n"
-            "· calamity-inc/MusinessBanager —— 生意管理器本体（出售/补货/库存监控）\n"
-            "· xhcherry/GTA5-Stand-LuaAIO —— 国内整合包，含 Musiness Banager 与中文翻译\n"
-            "· AnnaThorne/BusinessManager-Cargo-Add-On —— 自动出售 + 自动补货循环\n"
-            "· Perryx-20/cargo-loop-for-dummies —— 极简 cargo loop\n"
-            "· mageangela/QuellGTA —— 断网 / 卡单 / 差传工具\n"
-            "· LBWSIR/LBW-Cheat-Wiki —— 中文菜单文档与赚钱风险说明\n"
+            "【第 4 步 · 正式跑】\n"
+            "1. 先把员工派出去取货（-$7,500），人待在大仓里\n"
+            "2. 「先等（分钟）」填 48：给员工足够时间把货取回来\n"
+            "3. 「循环次数」填 85：大致能把大仓取满（一次 1~3 箱）\n"
+            "4. 点「开始自动取货」→ 然后别再碰键鼠，它会自己切模式、断网、确认\n"
+            "5. 看日志：出现「✔ 听到信号」「✔ 已断网」就是对的；连着几轮「没等到信号」就要调低阈值\n"
+            "6. 循环结束后回游戏确认左下角「保存成功」，手动同步一次存档\n"
+            "【风险】断网卡存档属于卡 Bug，收益异常仍可能被风控；别一次刷太满，别贪。\n"
         ),
         "log_busy": "… 上一次卡还没结束，忽略本次",
         "log_delay_wait": "⏳ {delay:g} 秒后执行卡仓",
@@ -335,6 +382,39 @@ STRINGS = {
         "log_hotkey_bad": "✗ Unknown key name: {key} (F1 ~ F12 only)",
         "log_hotkey_fail": "⚠ Hotkey registration failed: {label} (already in use?)",
         "tab_flow": "  Workflow  ",
+        "tab_pickup": "  Auto pickup  ",
+        "sec_audio": "Audio (WASAPI loopback - no virtual cable needed)",
+        "lbl_device": "Device:",
+        "btn_refresh_devices": "Refresh",
+        "lbl_level": "Live level: avg {avg:.0f} / peak {peak:.0f}",
+        "btn_test_listen": "Test 30 s",
+        "btn_test_pad": "Test gamepad",
+        "log_test_pad_ok": "✔ Virtual gamepad works (sent one A press)",
+        "log_test_pad_fail": "✗ Virtual gamepad unavailable: {err}",
+        "lbl_thresholds": "Trigger:",
+        "lbl_avg_th": "avg ≥",
+        "lbl_peak_th": "peak ≥",
+        "sec_loop": "Loop",
+        "lbl_wait_min": "Wait (min):",
+        "lbl_rounds": "Rounds:",
+        "sec_seq": "Key sequences (calibrate once in game)",
+        "lbl_seq_story": "To story:",
+        "lbl_seq_invite": "To invite:",
+        "lbl_seq_confirm": "Confirm:",
+        "btn_seq_default": "Restore defaults",
+        "btn_start_pickup": "Start auto pickup",
+        "btn_stop_pickup": "Stop",
+        "st_pickup_idle": "Ready",
+        "st_pickup_running": "Running: round {i}/{n}",
+        "log_pickup_nodep": "✗ Missing dependencies (soundcard / numpy / vgamepad)",
+        "log_test_listen": "· Listening for 30 s - let the game play the cue sound…",
+        "log_test_done": "· Test finished, peak {peak:.0f} (threshold {peak_th:.0f})",
+        "log_seq_help": (
+            "Sequence syntax: 'wait N' to pause; a / b / y / start / back / up / down / "
+            "left / right / lb / rb to press, with an optional repeat count"
+        ),
+        "log_pickup_started": "▶ Auto pickup started: wait {wait:g} min, {rounds} rounds",
+        "log_pickup_stopped": "■ Auto pickup stopped",
         "sec_hotkeys": "Hotkeys (change them if F8 / F9 are taken)",
         "lbl_hotkey_cut": "Cut key:",
         "lbl_hotkey_restore": "Restore key:",
@@ -345,53 +425,46 @@ STRINGS = {
         "log_copied": "✔ Copied to clipboard",
         "log_guide_missing": "✗ {name} was not found next to this tool",
         "flow_pre": (
-            "[Prerequisites - in game]\n"
-            "1. Be a CEO (an MC will not work, the script answers 'You are in an MC!')\n"
-            "2. Own special cargo warehouses\n"
-            "3. Stand inside the warehouse you are going to work on, otherwise the script warns\n"
-            "   ('You are not in your currently selected warehouse!')\n"
-            "4. The warehouse must have crates, otherwise ('no more crates in your warehouse')\n"
-            "5. Isolate the session first: Process tab -> Suspend game for 10 s\n"
+            "[Step 1 - in-game prerequisites]\n"
+            "1. Turn the game accelerator OFF - the firewall must really cut, accelerators interfere\n"
+            "2. Settings -> Graphics: screen type 'Windowed', 1024x768 is the most stable\n"
+            "3. Settings -> Audio: turn 'Mute game when not in focus' OFF (audio is read in background)\n"
+            "4. Send warehouse staff out to collect: you must see -$7,500 and the staff leaving\n"
+            "5. Spawn indoors (arcade recommended); avoid hangars and properties with a bathroom\n"
+            "6. Run this tool as administrator (firewall rules)\n"
         ),
         "flow_gta": (
-            "[GTA settings to set first]\n"
-            "- Settings -> Display -> Display mode: 'Borderless Window' or 'Windowed'.\n"
-            "  In exclusive fullscreen some systems/overlays swallow global hotkeys.\n"
-            "- Settings -> Graphics: keep the resolution equal to your desktop; avoid aggressive perf mods.\n"
-            "- Settings -> Key bindings: make sure F8 / F9 are free. If not, change them below.\n"
-            "- Overlays: Discord / Steam / accelerator overlays compete for hotkeys - turn them off.\n"
-            "- Accelerator: use process/game mode, not global proxy or TUN; set its install folder in Network.\n"
+            "[What is actually being glitched]\n"
+            "Normal: pay $7,500 to send staff out, wait 48 minutes, they bring back 1-3 crates.\n"
+            "A large warehouse holds 111 crates, so it takes dozens of hours by hand.\n"
+            "The trick: cut the network at the moment the game tries to save -> 'save failed', the\n"
+            "crates are already in the warehouse but this round does not count -> repeat.\n"
+            "The tool does three things: gamepad keys, listening for the cue, toggling the firewall.\n"
+            "No injection, no memory access, no packet editing.\n"
         ),
         "flow_buy": (
-            "[Restock (buy crates)]\n"
-            "A) In game: the laptop in your CEO office or warehouse -> buy 1 / 2 / 3 crates.\n"
-            "B) Menu script: Stand -> Musiness Banager -> Special Cargo. It also handles buying\n"
-            "   (in the source: SpecialCargoBuy* and BypassBuyCooldown).\n"
-            "- Fully automatic loop: add BusinessManager Cargo Add-On (auto sell + auto resupply, AFK).\n"
-            "- A large warehouse holds 111 crates. Restocking is a game transaction, same risk as selling.\n"
+            "[Step 2 - calibrate audio] (top half of the Auto pickup tab)\n"
+            "1. Pick the device your game plays through\n"
+            "2. Hit 'Test 30 s', let the game play the cue, watch the live peak\n"
+            "3. Set the thresholds to roughly half of that peak (peak 60 -> avg 25 / peak 45)\n"
+            "4. Or keep the defaults and read the log after one round\n"
         ),
         "flow_sell": (
-            "[Sell (price glitch)]\n"
-            "1. Stand menu (default key INSERT) -> Lua Scripts -> Repository, install 'Musiness Banager'\n"
-            "   or drop MusinessBanagersource.lua into %appdata%\\Stand\\Lua Scripts\n"
-            "2. Start it from the Lua Scripts list\n"
-            "3. Open Special Cargo - the panel lists your warehouses and stock\n"
-            "4. Select the warehouse you want to empty (up to 5 slots)\n"
-            "5. Turn on Max Sell Price (the source defaults to 6000000) - this is the price step\n"
-            "6. Press 'Sell A Crate' - one crate per press\n"
-            "7. Back in game, check cash / bank. Done.\n"
-            "How it works: the script rewrites game globals (SpecialCargoRewardPerCrate,\n"
-            "CrateMultiplier1/2/3) and then runs the game's own sale flow. That is a menu-side memory\n"
-            "write; this tool does not take part in it and ships no menu.\n"
+            "[Step 3 - calibrate the key sequences] (bottom half)\n"
+            "Syntax: 'wait N' pauses; a / b / y / start / back / up / down / left / right / lb / rb press,\n"
+            "optionally followed by a repeat count.\n"
+            "- Test all three sequences in your own game; edit them if a step lands wrong\n"
+            "- The defaults are a starting point for the Chinese UI; versions differ\n"
         ),
         "flow_refs": (
-            "[Reference projects on GitHub]\n"
-            "- calamity-inc/MusinessBanager - the business manager itself (sell / restock / stock monitor)\n"
-            "- xhcherry/GTA5-Stand-LuaAIO - Chinese all-in-one pack with Musiness Banager\n"
-            "- AnnaThorne/BusinessManager-Cargo-Add-On - automated sell + resupply loop\n"
-            "- Perryx-20/cargo-loop-for-dummies - minimal cargo loop\n"
-            "- mageangela/QuellGTA - network cut / session isolation tool\n"
-            "- LBWSIR/LBW-Cheat-Wiki - Chinese menu docs and money-making risk notes\n"
+            "[Step 4 - the real run]\n"
+            "1. Send the staff out (-$7,500) and stay inside the warehouse\n"
+            "2. 'Wait (min)' = 48, 'Rounds' = 85 (fills a large warehouse)\n"
+            "3. Hit 'Start auto pickup' and then keep your hands off keyboard and mouse\n"
+            "4. Watch the log: 'heard the signal' + 'cut' means it works; several missed rounds means\n"
+            "   your thresholds are too high\n"
+            "5. When it finishes, confirm 'save successful' in game and sync the save manually\n"
+            "[Risk] This is a save-blocking glitch. Abnormal income can still be flagged - do not be greedy.\n"
         ),
         "log_busy": "… previous cut still running, ignored",
         "log_delay_wait": "⏳ cutting in {delay:g}s",
@@ -736,6 +809,9 @@ class LilMute(tk.Tk):
         self.timers = []
         self.busy = threading.Lock()
         self.hotkey_thread_id = 0
+        self.pickup_thread = None
+        self.pickup_stop = None
+        self.audio_test_running = False
 
         self.geometry("740x620")
         self.minsize(680, 560)
@@ -795,17 +871,20 @@ class LilMute(tk.Tk):
         nb.pack(fill="both", expand=True, padx=10, pady=(8, 4))
 
         self.tab_main = ttk.Frame(nb)
+        self.tab_pickup = ttk.Frame(nb)
         self.tab_net = ttk.Frame(nb)
         self.tab_proc = ttk.Frame(nb)
         self.tab_flow = ttk.Frame(nb)
         self.tab_log = ttk.Frame(nb)
         nb.add(self.tab_main, text=t("tab_main"))
+        nb.add(self.tab_pickup, text=t("tab_pickup"))
         nb.add(self.tab_net, text=t("tab_net"))
         nb.add(self.tab_proc, text=t("tab_proc"))
         nb.add(self.tab_flow, text=t("tab_flow"))
         nb.add(self.tab_log, text=t("tab_log"))
 
         self._build_main_tab()
+        self._build_pickup_tab()
         self._build_net_tab()
         self._build_proc_tab()
         self._build_flow_tab()
@@ -859,6 +938,92 @@ class LilMute(tk.Tk):
         hint = ttk.LabelFrame(f, text=t("sec_notes"), padding=10)
         hint.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         ttk.Label(hint, text=t("note_main"), justify="left").pack(anchor="w")
+
+    def _build_pickup_tab(self) -> None:
+        f = self.tab_pickup
+        audio = ttk.LabelFrame(f, text=t("sec_audio"), padding=10)
+        audio.pack(fill="x", padx=10, pady=8)
+
+        row = ttk.Frame(audio)
+        row.pack(fill="x")
+        ttk.Label(row, text=t("lbl_device")).pack(side="left")
+        self.device_var = tk.StringVar(value=self.cfg.get("pickup_device", ""))
+        self.device_box = ttk.Combobox(row, textvariable=self.device_var, values=[], state="readonly")
+        self.device_box.pack(side="left", fill="x", expand=True, padx=6)
+        ttk.Button(row, text=t("btn_refresh_devices"), command=self.action_refresh_devices).pack(side="left")
+
+        row2 = ttk.Frame(audio)
+        row2.pack(fill="x", pady=(6, 0))
+        self.level_var = tk.StringVar(value=t("lbl_level", avg=0, peak=0))
+        self.level_label = tk.Label(
+            row2, textvariable=self.level_var, anchor="w",
+            fg=COLOR_MUTED, font=("Consolas", 11),
+        )
+        self.level_label.pack(side="left")
+        ttk.Button(row2, text=t("btn_test_listen"), command=self.action_test_listen).pack(side="right")
+        ttk.Button(row2, text=t("btn_test_pad"), command=self.action_test_pad).pack(side="right", padx=6)
+
+        row3 = ttk.Frame(audio)
+        row3.pack(fill="x", pady=(6, 0))
+        ttk.Label(row3, text=t("lbl_thresholds")).pack(side="left")
+        ttk.Label(row3, text=t("lbl_avg_th")).pack(side="left")
+        self.avg_th_var = tk.StringVar(value=str(self.cfg.get("pickup_avg", 25)))
+        ttk.Entry(row3, textvariable=self.avg_th_var, width=5).pack(side="left", padx=(2, 12))
+        ttk.Label(row3, text=t("lbl_peak_th")).pack(side="left")
+        self.peak_th_var = tk.StringVar(value=str(self.cfg.get("pickup_peak", 45)))
+        ttk.Entry(row3, textvariable=self.peak_th_var, width=5).pack(side="left", padx=2)
+
+        loop = ttk.LabelFrame(f, text=t("sec_loop"), padding=10)
+        loop.pack(fill="x", padx=10, pady=(0, 8))
+        row4 = ttk.Frame(loop)
+        row4.pack(anchor="w")
+        ttk.Label(row4, text=t("lbl_wait_min")).pack(side="left")
+        self.wait_min_var = tk.StringVar(value=str(self.cfg.get("pickup_wait_min", 48)))
+        ttk.Entry(row4, textvariable=self.wait_min_var, width=6).pack(side="left", padx=(2, 18))
+        ttk.Label(row4, text=t("lbl_rounds")).pack(side="left")
+        self.rounds_var = tk.StringVar(value=str(self.cfg.get("pickup_rounds", 85)))
+        ttk.Entry(row4, textvariable=self.rounds_var, width=6).pack(side="left", padx=2)
+
+        seq = ttk.LabelFrame(f, text=t("sec_seq"), padding=10)
+        seq.pack(fill="x", padx=10, pady=(0, 8))
+        defaults = {
+            "seq_to_story": "to_story",
+            "seq_to_invite": "to_invite",
+            "seq_confirm": "confirm",
+        }
+        for cfg_key, label_key in (
+            ("seq_to_story", "lbl_seq_story"),
+            ("seq_to_invite", "lbl_seq_invite"),
+            ("seq_confirm", "lbl_seq_confirm"),
+        ):
+            line = ttk.Frame(seq)
+            line.pack(fill="x", pady=2)
+            ttk.Label(line, text=t(label_key), width=12, anchor="w").pack(side="left")
+            default_value = ""
+            if pickup_mod is not None:
+                default_value = pickup_mod.DEFAULT_SEQUENCES.get(defaults[cfg_key], "")
+            var = tk.StringVar(value=self.cfg.get(cfg_key) or default_value)
+            ttk.Entry(line, textvariable=var).pack(side="left", fill="x", expand=True, padx=6)
+            setattr(self, cfg_key + "_var", var)
+        ttk.Button(seq, text=t("btn_seq_default"), command=self.action_restore_sequences).pack(
+            anchor="e", pady=(4, 0)
+        )
+
+        act = ttk.Frame(f)
+        act.pack(fill="x", padx=10, pady=(0, 10))
+        self.pickup_btn = ttk.Button(
+            act, text=t("btn_start_pickup"), style="Big.TButton", command=self.action_start_pickup
+        )
+        self.pickup_btn.pack(side="left", expand=True, fill="x", padx=(0, 6))
+        self.pickup_stop_btn = ttk.Button(
+            act, text=t("btn_stop_pickup"), style="Big.TButton",
+            command=self.action_stop_pickup, state="disabled",
+        )
+        self.pickup_stop_btn.pack(side="left", expand=True, fill="x", padx=(6, 0))
+        if not HAS_PICKUP:
+            self.pickup_btn.state(["disabled"])
+
+        self.action_refresh_devices(quiet=True)
 
     def _build_net_tab(self) -> None:
         f = self.tab_net
@@ -1078,6 +1243,159 @@ class LilMute(tk.Tk):
             "https://github.com/LBWSIR/LBW-Cheat-Wiki",
         )))
 
+    # ---------------- 自动取货 ----------------
+    def _save_pickup_cfg(self) -> None:
+        self.cfg.update({
+            "pickup_device": self.device_var.get().strip(),
+            "pickup_avg": self._read_float(self.avg_th_var, 25.0),
+            "pickup_peak": self._read_float(self.peak_th_var, 45.0),
+            "pickup_rounds": int(self._read_float(self.rounds_var, 85)),
+            "pickup_wait_min": self._read_float(self.wait_min_var, 48.0),
+            "seq_to_story": self.seq_to_story_var.get().strip(),
+            "seq_to_invite": self.seq_to_invite_var.get().strip(),
+            "seq_confirm": self.seq_confirm_var.get().strip(),
+        })
+        save_config(self.cfg)
+
+    def action_refresh_devices(self, quiet: bool = False) -> None:
+        if pickup_mod is None:
+            self.log(t("log_pickup_nodep"))
+            return
+        try:
+            devices = pickup_mod.AudioMonitor.list_devices()
+        except Exception as exc:
+            self.log(f"✗ 读取音频设备失败：{exc}")
+            return
+        self.device_box.configure(values=devices)
+        if self.device_var.get() not in devices:
+            default = pickup_mod.AudioMonitor.default_device()
+            self.device_var.set(default if default in devices else (devices[0] if devices else ""))
+        if not quiet:
+            self.log(f"· 找到 {len(devices)} 个可回环设备")
+
+    def action_restore_sequences(self) -> None:
+        if pickup_mod is None:
+            return
+        for cfg_key, default_key in (
+            ("seq_to_story", "to_story"),
+            ("seq_to_invite", "to_invite"),
+            ("seq_confirm", "confirm"),
+        ):
+            getattr(self, cfg_key + "_var").set(pickup_mod.DEFAULT_SEQUENCES[default_key])
+        self.log("· 已恢复默认序列（记得在游戏里校准）")
+
+    def _on_level(self, avg, peak) -> None:
+        self.hotkey_queue.put(("level", (avg, peak)))
+
+    def action_test_listen(self) -> None:
+        if pickup_mod is None:
+            self.log(t("log_pickup_nodep"))
+            return
+        if self.audio_test_running:
+            return
+        self.audio_test_running = True
+        self.log(t("log_test_listen"))
+        peak_th = self._read_float(self.peak_th_var, 45.0)
+        device = self.device_var.get()
+
+        def worker():
+            monitor = pickup_mod.AudioMonitor()
+            monitor.start(device, self._on_level)
+            best = 0.0
+            end = time.time() + 30
+            while time.time() < end:
+                best = max(best, monitor.peak)
+                time.sleep(0.2)
+            monitor.stop()
+            self.hotkey_queue.put(("log", t("log_test_done", peak=best, peak_th=peak_th)))
+            self.hotkey_queue.put(("call", self._finish_test))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_test(self) -> None:
+        self.audio_test_running = False
+
+    def action_test_pad(self) -> None:
+        if pickup_mod is None:
+            self.log(t("log_pickup_nodep"))
+            return
+        try:
+            pad = pickup_mod.PadController()
+            pad.click("a")
+            self.log(t("log_test_pad_ok"))
+        except Exception as exc:
+            self.log(t("log_test_pad_fail", err=exc))
+
+    def _pickup_block(self) -> None:
+        game = find_game()
+        if not game:
+            self.log_async("✗ 找不到游戏进程，跳过断网")
+            return
+        ok, out = fw_block(game[2])
+        if not ok:
+            self.log_async(t("log_block_fail", out=out))
+
+    def _pickup_unblock(self) -> None:
+        fw_unblock()
+
+    def action_start_pickup(self) -> None:
+        if pickup_mod is None:
+            self.log(t("log_pickup_nodep"))
+            return
+        if self.pickup_thread and self.pickup_thread.is_alive():
+            self.log("… 已经在跑了")
+            return
+        if not find_game():
+            self.log("✗ 没检测到游戏进程，先开 GTA 再启动")
+            return
+        if not is_admin():
+            self.log(t("log_need_admin"))
+            return
+        self._save_pickup_cfg()
+        stop = threading.Event()
+        self.pickup_stop = stop
+        engine = pickup_mod.PickupEngine(self._pickup_block, self._pickup_unblock, self.log_async)
+        args = {
+            "rounds": int(self._read_float(self.rounds_var, 85)),
+            "wait_minutes": self._read_float(self.wait_min_var, 48.0),
+            "avg_th": self._read_float(self.avg_th_var, 25.0),
+            "peak_th": self._read_float(self.peak_th_var, 45.0),
+            "device": self.device_var.get(),
+            "sequences": {
+                "to_story": self.seq_to_story_var.get(),
+                "to_invite": self.seq_to_invite_var.get(),
+                "confirm": self.seq_confirm_var.get(),
+            },
+            "params": {},
+            "stop": stop,
+        }
+        self.log(t("log_pickup_started", wait=args["wait_minutes"], rounds=args["rounds"]))
+        self.log(t("log_seq_help"))
+
+        def worker():
+            try:
+                engine.run(**args)
+            except Exception as exc:
+                self.log_async(f"✗ 自动取货出错：{exc}")
+            finally:
+                self.hotkey_queue.put(("call", self._pickup_finished))
+
+        self.pickup_thread = threading.Thread(target=worker, daemon=True, name="pickup")
+        self.pickup_btn.state(["disabled"])
+        self.pickup_stop_btn.state(["!disabled"])
+        self.set_status(t("st_pickup_running", i=0, n=args["rounds"]))
+        self.pickup_thread.start()
+
+    def action_stop_pickup(self) -> None:
+        if self.pickup_stop:
+            self.pickup_stop.set()
+        self.log(t("log_pickup_stopped"))
+
+    def _pickup_finished(self) -> None:
+        self.pickup_btn.state(["!disabled"])
+        self.pickup_stop_btn.state(["disabled"])
+        self.set_status(t("st_pickup_idle"))
+
     def clear_log(self) -> None:
         self.log_box.configure(state="normal")
         self.log_box.delete("1.0", "end")
@@ -1155,6 +1473,14 @@ class LilMute(tk.Tk):
                     self.log(t(key, **kwargs))
                 elif kind == "log":
                     self.log(str(payload))
+                elif kind == "level":
+                    avg, peak = payload
+                    self.level_var.set(t("lbl_level", avg=avg, peak=peak))
+                    try:
+                        hot = peak >= self._read_float(self.peak_th_var, 45.0)
+                    except Exception:
+                        hot = False
+                    self.level_label.configure(fg=COLOR_BAD if hot else COLOR_MUTED)
                 elif kind == "call":
                     payload()
         except queue.Empty:
@@ -1356,6 +1682,22 @@ def main() -> int:
     if "--touch-config" in sys.argv:
         # 诊断用：确认配置文件到底落在哪，然后立刻退出（不开界面）
         save_config(load_config())
+        return 0
+    if "--pickup-selftest" in sys.argv:
+        # 诊断用：把音频/手柄自检结果写到 exe 旁边，用于验证打包是否完整
+        lines = []
+        try:
+            import pickup as pm
+
+            lines.append(f"HAS_AUDIO={pm.HAS_AUDIO} HAS_PAD={pm.HAS_PAD}")
+            lines.append("devices=" + " | ".join(pm.AudioMonitor.list_devices()))
+            pad = pm.PadController()
+            pad.ensure()
+            lines.append("gamepad=OK")
+        except Exception as exc:
+            lines.append(f"ERROR: {exc!r}")
+        with open(os.path.join(app_dir(), "pickup-selftest.txt"), "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines))
         return 0
     if "--selftest" in sys.argv:
         return selftest()
