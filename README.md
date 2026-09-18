@@ -1,5 +1,7 @@
 # Lil Mute - GTA Online warehouse glitch helper
 
+<img src="assets/icon.png" width="104" align="right" alt="Lil Mute icon">
+
 Press a hotkey, the game's network connection is cut for a moment, then restored
 automatically. That is the whole idea. Pure OS-level — no injection, no memory
 access, no packet editing. The interface ships in **English and Chinese** and you
