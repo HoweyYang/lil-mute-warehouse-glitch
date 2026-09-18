@@ -23,7 +23,7 @@ can switch it in-app.
 | Cut (F8) | Blocks **outbound traffic of the GTA5 process only**, using a Windows Firewall rule |
 | Auto restore | Removes the rule again after the configured number of seconds |
 | Global hotkeys | `F8` to cut, `F9` to restore — both work while the game is fullscreen |
-| Block the accelerator too | Optional: blocks your game accelerator's processes in the same cut, for when it tunnels the traffic |
+| Block the accelerator too | Point it at the accelerator's install folder (or list process names) and those processes are cut in the same press |
 | Suspend | Freezes the game process briefly; a no-injection way to get a solo session |
 | Kill process | One-click `taskkill`, commonly used to save progress in challenge runs |
 | Workflow tab | The restock → sell flow, the in-game prerequisites and the required GTA display settings, built into the app |
@@ -167,7 +167,7 @@ does the first one:
 | 一键卡（F8） | 用 Windows 防火墙**只封禁 GTA5 进程**的出站流量 |
 | 自动恢复 | 到设定秒数自动解除封禁；也能 F9 或点按钮立刻恢复 |
 | 全局热键 | `F8` 卡 / `F9` 恢复，游戏全屏时同样生效 |
-| 同时封禁加速器 | 可选：把加速器进程也一起断，专治"显示已封禁但游戏没掉线" |
+| 同时封禁加速器 | 填加速器的安装目录（或进程名），卡的时候把它们的进程一起断 |
 | 进程暂停 | 短暂冻结游戏进程（免注入的卡单方式），到点自动恢复 |
 | 结束进程 | 一键 `taskkill`，任务 / 首脑里常用的保进度操作 |
 | 流程页 | 前置条件、GTA 要设的东西、取货、出货脚本步骤全内置，游戏里不用翻 PDF |

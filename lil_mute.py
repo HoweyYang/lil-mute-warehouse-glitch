@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import ctypes
+import hashlib
 import json
 import locale
 import os
@@ -23,15 +24,24 @@ import threading
 import time
 import tkinter as tk
 from ctypes import wintypes
-from tkinter import messagebox, scrolledtext, ttk
+from tkinter import filedialog, messagebox, scrolledtext, ttk
 
-APP_VER = "1.3.0"
+APP_VER = "1.4.0"
 APP_NAME = {"zh": "小哑巴 · 卡大仓", "en": "Lil Mute · Warehouse Glitch"}
 APP_SHORT = {"zh": "小哑巴", "en": "Lil Mute"}
 RULE_NAME = "LilMute-BlockOut"
 RULE_PREFIX = "LilMute-"
 GAME_EXE_NAMES = ("GTA5.exe", "GTA5_Enhanced.exe")
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+
+
+def app_dir() -> str:
+    """程序所在目录。打包成 exe 后 __file__ 指向临时解压目录，必须用 sys.executable。"""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+CONFIG_PATH = os.path.join(app_dir(), "config.json")
 
 DEFAULT_CONFIG = {
     "lang": "",
@@ -41,6 +51,7 @@ DEFAULT_CONFIG = {
     "hotkey_cut": "F8",
     "hotkey_restore": "F9",
     "accel_block": False,
+    "accel_dir": "",
     "accel_names": (
         "uu.exe,UUGameAssistant.exe,uu_booster.exe,"
         "XunyouClient.exe,XunyouAcc.exe,QiyouBox.exe,qiyou.exe,LeiShen.exe"
@@ -60,6 +71,10 @@ VK_F8, VK_F9 = 0x77, 0x78
 
 # 热键表：F1~F12 够用，避免引入键盘钩子
 VK_TABLE = {f"F{i}": 0x6F + i for i in range(1, 13)}
+
+COLOR_OK = "#1A7F37"
+COLOR_BAD = "#CF222E"
+COLOR_MUTED = "#57606A"
 
 # --------------------------------------------------------------------------
 # 文案 / Strings
@@ -82,10 +97,9 @@ STRINGS = {
         "btn_ka": "卡！(F8)",
         "btn_restore": "立即恢复 (F9)",
         "note_main": (
-            "· 断网只封禁游戏进程本身（出站），浏览器 / 微信不受影响。\n"
-            "· F8 / F9 是全局热键，游戏全屏时也生效。\n"
-            "· 用完点“立即恢复”；直接关窗口也会自动解除封禁。\n"
-            "· 本工具不注入、不读内存、不改数据包；但频繁卡 Bug 刷币仍可能被封号。"
+            "· 只断游戏（和加速器）进程，浏览器 / 微信不受影响\n"
+            "· F8 卡 / F9 恢复；关窗口会自动解除封禁\n"
+            "· 不注入、不读内存；频繁刷币有封号风险"
         ),
         "game_running": "游戏进程：{name}  (PID {pid})",
         "game_none": "游戏进程：未运行",
@@ -104,32 +118,31 @@ STRINGS = {
         "chk_accel": "卡的时候把加速器进程也一起封禁",
         "lbl_accel_names": "加速器进程名（逗号分隔）：",
         "btn_accel_scan": "检测进程",
+        "lbl_accel_dir": "加速器目录：",
+        "btn_browse": "浏览",
         "note_accel": (
-            "· 加速器是驱动级接管游戏流量，只封游戏进程有时不管用；勾上这个，F8 会把加速器进程\n"
-            "   也一起封掉，断网更彻底。\n"
-            "· 进程名去任务管理器里看（右键加速器 → 打开文件位置），填进来即可。\n"
-            "· 名字填错没有副作用：检测不到就只封游戏。"
+            "推荐填加速器安装目录：该目录下正在跑的进程会一起封掉。\n"
+            "进程名是备用方案，填错没有副作用——检测不到就只封游戏。"
         ),
         "log_accel_found": "检测到 {n} 个加速器进程：{list}",
         "log_accel_none": "没检测到配置里的加速器进程（不影响游戏封禁）",
         "log_accel_blocked": "✔ 同时封禁了 {n} 个加速器进程",
         "log_accel_skipped": "· 未检测到加速器进程，只封了游戏",
         "log_accel_fail": "⚠ 加速器进程封禁失败：{name}",
-        "note_net": (
-            "· 需要管理员权限；规则名固定为：\n"
-            "   {rule}\n"
-            "· 手动清理：高级安全 Windows Defender 防火墙 → 出站规则 → 删除同名规则，或执行\n"
-            '   netsh advfirewall firewall delete rule name="{rule}"'
-        ),
+        "note_net": "规则名 {rule}；清理命令可在「流程」页一键复制",
+        "st_accel_on": "加速器：已启用封禁",
+        "st_accel_off": "加速器：未启用",
+        "accel_scan_none": "未匹配到进程（加速器没启动时就是这个结果）",
+        "accel_scan_hit": "已匹配 {n} 个进程",
+        "lbl_accel_names_adv": "进程名：",
         "sec_proc": "进程操作（免注入）",
         "lbl_suspend": "暂停时长(秒)：",
         "btn_suspend": "暂停游戏",
         "btn_resume": "恢复运行",
         "btn_kill": "结束游戏进程",
         "note_proc": (
-            "· 暂停进程 = 让游戏短暂冻结，常用来卡单；到点自动恢复，不会卡死。\n"
-            "· 结束进程不会上传结算，是首脑 / 任务里常见的“保进度”操作。\n"
-            "· 二者都是普通系统操作，不涉及注入或内存修改。"
+            "· 暂停 = 短暂冻结游戏，用来卡单；到点自动恢复\n"
+            "· 结束进程不会上传结算，任务里常用来保进度"
         ),
         "btn_clear_log": "清空日志",
         "ready": "就绪",
@@ -174,7 +187,7 @@ STRINGS = {
             "· 设置 → 图形：分辨率与桌面一致；别装激进的性能 mod\n"
             "· 设置 → 按键：确认 F8 / F9 没被占用；占了就改本工具的键（下面）\n"
             "· 叠加层：Discord / Steam / 加速器的 overlay 建议关，它们会抢热键\n"
-            "· 加速器：用「进程 / 游戏模式」，别开全局代理或 TUN；并把进程名填进网络页\n"
+            "· 加速器：用「进程 / 游戏模式」，别开全局代理或 TUN；并在网络页填它的安装目录\n"
         ),
         "flow_buy": (
             "【取货（进货）】\n"
@@ -256,10 +269,9 @@ STRINGS = {
         "btn_ka": "CUT! (F8)",
         "btn_restore": "RESTORE (F9)",
         "note_main": (
-            "· Only the game process is blocked (outbound). Browser / chat apps are unaffected.\n"
-            "· F8 / F9 are global hotkeys, they work while the game is fullscreen.\n"
-            "· Press RESTORE when done; closing the window also clears the rule.\n"
-            "· No injection, no memory access, no packet editing — but abusing glitches can still get you banned."
+            "· Only the game (and accelerator) processes are cut — browser / chat apps stay online\n"
+            "· F8 to cut, F9 to restore; closing the window clears the rules\n"
+            "· No injection, no memory access; farming glitches can still get you flagged"
         ),
         "game_running": "Game process: {name}  (PID {pid})",
         "game_none": "Game process: not running",
@@ -278,32 +290,31 @@ STRINGS = {
         "chk_accel": "Block the accelerator processes as well when cutting",
         "lbl_accel_names": "Accelerator process names (comma separated):",
         "btn_accel_scan": "Detect",
+        "lbl_accel_dir": "Accelerator folder:",
+        "btn_browse": "Browse",
         "note_accel": (
-            "· Accelerators take over the game's traffic at driver level, so blocking only the game\n"
-            "   process sometimes does nothing. Tick this and F8 will block the accelerator too.\n"
-            "· Get the process name from Task Manager (Details tab) and paste it here.\n"
-            "· A wrong name is harmless: if nothing matches, only the game is blocked."
+            "Point it at the accelerator's install folder: every process running from there is cut too.\n"
+            "A wrong name is harmless - if nothing matches, only the game is blocked."
         ),
         "log_accel_found": "Found {n} accelerator process(es): {list}",
         "log_accel_none": "None of the configured accelerator processes are running (game blocking still works)",
         "log_accel_blocked": "✔ Also blocked {n} accelerator process(es)",
         "log_accel_skipped": "· No accelerator process found, blocked the game only",
         "log_accel_fail": "⚠ Failed to block accelerator process: {name}",
-        "note_net": (
-            "· Requires administrator rights. Rule name is fixed:\n"
-            "   {rule}\n"
-            "· To clean up manually: Windows Defender Firewall with Advanced Security → Outbound Rules, or run\n"
-            '   netsh advfirewall firewall delete rule name="{rule}"'
-        ),
+        "note_net": "Rule name: {rule}. Copy the cleanup command from the Workflow tab.",
+        "st_accel_on": "Accelerator: blocked too",
+        "st_accel_off": "Accelerator: off",
+        "accel_scan_none": "No processes matched (expected while the accelerator is off)",
+        "accel_scan_hit": "Matched {n} process(es)",
+        "lbl_accel_names_adv": "Process names:",
         "sec_proc": "Process actions (no injection)",
         "lbl_suspend": "Suspend for (s):",
         "btn_suspend": "Suspend game",
         "btn_resume": "Resume",
         "btn_kill": "Kill game process",
         "note_proc": (
-            "· Suspending freezes the game briefly (a common way to get a solo session); it auto-resumes.\n"
-            "· Killing the process skips the save, commonly used to protect progress in challenges.\n"
-            "· Both are plain OS operations, no injection or memory patching."
+            "· Suspend freezes the game briefly (a common way to get a solo session); it auto-resumes\n"
+            "· Killing the process skips the save, useful to protect progress in challenges"
         ),
         "btn_clear_log": "Clear log",
         "ready": "Ready",
@@ -349,7 +360,7 @@ STRINGS = {
             "- Settings -> Graphics: keep the resolution equal to your desktop; avoid aggressive perf mods.\n"
             "- Settings -> Key bindings: make sure F8 / F9 are free. If not, change them below.\n"
             "- Overlays: Discord / Steam / accelerator overlays compete for hotkeys - turn them off.\n"
-            "- Accelerator: use process/game mode, not global proxy or TUN; paste its process name in Network.\n"
+            "- Accelerator: use process/game mode, not global proxy or TUN; set its install folder in Network.\n"
         ),
         "flow_buy": (
             "[Restock (buy crates)]\n"
@@ -642,8 +653,27 @@ def find_processes_by_names(names) -> list:
     return found
 
 
-def accel_rule_name(process_name: str) -> str:
-    return RULE_PREFIX + "Accel-" + os.path.splitext(process_name)[0]
+def accel_rule_name(program_path: str) -> str:
+    """按完整路径生成规则名：同名不同路径的进程（如多版本 accservice.exe）不会互相顶掉。"""
+    digest = hashlib.md5(program_path.lower().encode("utf-8")).hexdigest()[:8]
+    return RULE_PREFIX + "Accel-" + digest
+
+
+def find_processes_by_dir(folder: str) -> list:
+    """找可执行文件位于该目录（含子目录）下的所有运行中进程。"""
+    folder = (folder or "").strip().strip('"').rstrip("\\/")
+    if not folder:
+        return []
+    root = os.path.normcase(os.path.normpath(folder))
+    found = []
+    for pid, name in iter_processes():
+        path = process_path(pid)
+        if not path:
+            continue
+        full = os.path.normcase(os.path.normpath(path))
+        if full == root or full.startswith(root + os.sep):
+            found.append((pid, name, path))
+    return found
 
 
 def fw_is_blocked() -> bool:
@@ -789,10 +819,20 @@ class LilMute(tk.Tk):
         f = self.tab_main
         box = ttk.LabelFrame(f, text=t("sec_status"), padding=10)
         box.pack(fill="x", padx=10, pady=8)
-        self.game_var = tk.StringVar(value=t("st_detecting"))
-        ttk.Label(box, textvariable=self.game_var).pack(anchor="w")
-        self.net_var = tk.StringVar(value=t("st_detecting"))
-        ttk.Label(box, textvariable=self.net_var).pack(anchor="w", pady=(4, 0))
+        self.game_label = tk.Label(
+            box, text=t("game_none"), anchor="w", fg=COLOR_MUTED,
+            font=("Microsoft YaHei UI", 10),
+        )
+        self.game_label.pack(fill="x")
+        self.net_label = tk.Label(
+            box, text=t("st_detecting"), anchor="w", fg=COLOR_MUTED,
+            font=("Microsoft YaHei UI", 11, "bold"),
+        )
+        self.net_label.pack(fill="x", pady=(4, 0))
+        self.accel_label = tk.Label(
+            box, text="", anchor="w", fg=COLOR_MUTED, font=("Microsoft YaHei UI", 9)
+        )
+        self.accel_label.pack(fill="x", pady=(2, 0))
         ttk.Button(box, text=t("lbl_refresh"), command=self.refresh_state).pack(anchor="e", pady=(6, 0))
 
         param = ttk.LabelFrame(f, text=t("sec_params"), padding=10)
@@ -844,18 +884,40 @@ class LilMute(tk.Tk):
         ttk.Checkbutton(
             accel, text=t("chk_accel"), variable=self.accel_chk_var, command=self._save_accel
         ).pack(anchor="w")
-        row = ttk.Frame(accel)
-        row.pack(fill="x", pady=(6, 0))
-        ttk.Label(row, text=t("lbl_accel_names")).pack(side="left")
-        self.accel_names_var = tk.StringVar(value=self.cfg.get("accel_names", ""))
-        ttk.Entry(row, textvariable=self.accel_names_var).pack(
+
+        # 主选：加速器目录（整目录进程一起封）
+        row_dir = ttk.Frame(accel)
+        row_dir.pack(fill="x", pady=(6, 0))
+        ttk.Label(row_dir, text=t("lbl_accel_dir"), width=16, anchor="w").pack(side="left")
+        self.accel_dir_var = tk.StringVar(value=self.cfg.get("accel_dir", ""))
+        ttk.Entry(row_dir, textvariable=self.accel_dir_var).pack(
             side="left", fill="x", expand=True, padx=6
         )
-        ttk.Button(row, text=t("btn_accel_scan"), command=self.action_scan_accel).pack(side="left")
-        ttk.Label(accel, text=t("note_accel"), justify="left").pack(anchor="w", pady=(6, 0))
+        ttk.Button(row_dir, text=t("btn_browse"), command=self.action_pick_accel_dir).pack(side="left")
+
+        # 备选：进程名
+        row_name = ttk.Frame(accel)
+        row_name.pack(fill="x", pady=(4, 0))
+        ttk.Label(row_name, text=t("lbl_accel_names_adv"), width=16, anchor="w").pack(side="left")
+        self.accel_names_var = tk.StringVar(value=self.cfg.get("accel_names", ""))
+        ttk.Entry(row_name, textvariable=self.accel_names_var).pack(
+            side="left", fill="x", expand=True, padx=6
+        )
+        ttk.Button(row_name, text=t("btn_accel_scan"), command=self.action_scan_accel).pack(side="left")
+
+        self.accel_hint = tk.Label(
+            accel, text=t("note_accel"), anchor="w", justify="left",
+            fg=COLOR_MUTED, font=("Microsoft YaHei UI", 9),
+        )
+        self.accel_hint.pack(fill="x", pady=(6, 0))
+        self.accel_result = tk.Label(
+            accel, text="", anchor="w", justify="left",
+            fg=COLOR_MUTED, font=("Microsoft YaHei UI", 9),
+        )
+        self.accel_result.pack(fill="x")
 
         tip = ttk.LabelFrame(f, text=t("sec_notes"), padding=10)
-        tip.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        tip.pack(fill="x", padx=10, pady=(0, 10))
         ttk.Label(tip, text=t("note_net", rule=RULE_NAME), justify="left").pack(anchor="w")
 
     def _build_proc_tab(self) -> None:
@@ -943,22 +1005,38 @@ class LilMute(tk.Tk):
     def _save_accel(self) -> None:
         self.cfg["accel_block"] = bool(self.accel_chk_var.get())
         self.cfg["accel_names"] = self.accel_names_var.get().strip()
+        self.cfg["accel_dir"] = self.accel_dir_var.get().strip()
         save_config(self.cfg)
+        try:
+            self.refresh_state()
+        except Exception:
+            pass
 
     def _accel_names(self) -> list:
         return [n.strip() for n in str(self.accel_names_var.get()).split(",") if n.strip()]
 
     def action_scan_accel(self) -> None:
         self._save_accel()
-        found = find_processes_by_names(self._accel_names())
-        if found:
-            self.log(t(
-                "log_accel_found",
-                n=len(found),
-                list=", ".join(f"{name} (PID {pid})" for pid, name, _ in found),
-            ))
+        targets = {}
+        for pid, name, path in find_processes_by_names(self._accel_names()):
+            targets[path.lower()] = (name, pid)
+        for pid, name, path in find_processes_by_dir(self.cfg.get("accel_dir", "")):
+            targets[path.lower()] = (name, pid)
+        if targets:
+            detail = ", ".join(f"{name} (PID {pid})" for name, pid in targets.values())
+            self.accel_result.configure(text=t("accel_scan_hit", n=len(targets)) + "：" + detail,
+                                        fg=COLOR_OK)
+            self.log(t("log_accel_found", n=len(targets), list=detail))
         else:
+            self.accel_result.configure(text=t("accel_scan_none"), fg=COLOR_MUTED)
             self.log(t("log_accel_none"))
+
+    def action_pick_accel_dir(self) -> None:
+        folder = filedialog.askdirectory(title=t("lbl_accel_dir"))
+        if folder:
+            self.accel_dir_var.set(folder.replace("/", "\\"))
+            self._save_accel()
+            self.action_scan_accel()
 
     def action_apply_hotkeys(self) -> None:
         cut = str(self.hotkey_cut_var.get()).strip().upper()
@@ -972,13 +1050,8 @@ class LilMute(tk.Tk):
         self._start_hotkeys()
         self.log(t("log_hotkeys_applied", cut=cut, restore=restore))
 
-    def _app_dir(self) -> str:
-        if getattr(sys, "frozen", False):
-            return os.path.dirname(os.path.abspath(sys.executable))
-        return os.path.dirname(os.path.abspath(__file__))
-
     def action_open_guide(self) -> None:
-        base = self._app_dir()
+        base = app_dir()
         for name in ("lil-mute-guide-zh.pdf", "小哑巴-卡大仓-使用教程.pdf"):
             path = os.path.join(base, name)
             if os.path.exists(path):
@@ -1017,13 +1090,22 @@ class LilMute(tk.Tk):
         game = find_game()
         if game:
             pid, name, path = game
-            self.game_var.set(t("game_running", name=name, pid=pid))
+            self.game_label.configure(text=t("game_running", name=name, pid=pid), fg=COLOR_OK)
             self.path_var.set(path or t("st_read_fail"))
         else:
-            self.game_var.set(t("game_none"))
+            self.game_label.configure(text=t("game_none"), fg=COLOR_MUTED)
             self.path_var.set(t("path_none"))
         blocked = fw_is_blocked()
-        self.net_var.set(t("net_blocked") if blocked else t("net_ok"))
+        self.net_label.configure(
+            text=t("net_blocked") if blocked else t("net_ok"),
+            fg=COLOR_BAD if blocked else COLOR_OK,
+        )
+        accel_dir = str(self.cfg.get("accel_dir", "")).strip()
+        if self.cfg.get("accel_block"):
+            suffix = f"（{accel_dir}）" if accel_dir else ""
+            self.accel_label.configure(text=t("st_accel_on") + suffix, fg=COLOR_OK)
+        else:
+            self.accel_label.configure(text=t("st_accel_off"), fg=COLOR_MUTED)
         self.rule_var.set(t("rule_exists") if blocked else t("rule_none"))
         self.admin_btn.state(["disabled"] if is_admin() else ["!disabled"])
         return blocked
@@ -1123,9 +1205,14 @@ class LilMute(tk.Tk):
             return False
         self.log(t("log_blocked", name=name))
         if self.cfg.get("accel_block"):
+            targets = {}
+            for _pid, aname, apath in find_processes_by_names(self._accel_names()):
+                targets[apath.lower()] = (aname, apath)
+            for _pid, aname, apath in find_processes_by_dir(self.cfg.get("accel_dir", "")):
+                targets[apath.lower()] = (aname, apath)
             blocked = 0
-            for _apid, aname, apath in find_processes_by_names(self._accel_names()):
-                ok_accel, _ = fw_block(apath, accel_rule_name(aname))
+            for aname, apath in targets.values():
+                ok_accel, _ = fw_block(apath, accel_rule_name(apath))
                 if ok_accel:
                     blocked += 1
                 else:
@@ -1266,6 +1353,10 @@ def main() -> int:
         _FORCE_LANG = "en"
     elif "--zh" in sys.argv:
         _FORCE_LANG = "zh"
+    if "--touch-config" in sys.argv:
+        # 诊断用：确认配置文件到底落在哪，然后立刻退出（不开界面）
+        save_config(load_config())
+        return 0
     if "--selftest" in sys.argv:
         return selftest()
     app = LilMute()
