@@ -654,7 +654,7 @@ def find_processes_by_names(names) -> list:
 
 
 def accel_rule_name(program_path: str) -> str:
-    """按完整路径生成规则名：同名不同路径的进程（如多版本 accservice.exe）不会互相顶掉。"""
+    """按完整路径生成规则名：同名但不同路径的进程不会互相顶掉。"""
     digest = hashlib.md5(program_path.lower().encode("utf-8")).hexdigest()[:8]
     return RULE_PREFIX + "Accel-" + digest
 
