@@ -1,9 +1,9 @@
-# Lil Mute · Warehouse Glitch
+# Lil Mute - GTA Online warehouse glitch helper
 
-A small Windows tool for GTA Online warehouse runs: press a hotkey, the game's
-network connection is cut for a moment, then restored automatically. Pure OS-level —
-no injection, no memory access, no packet editing. The interface ships in **English
-and Chinese** and you can switch it in-app.
+Press a hotkey, the game's network connection is cut for a moment, then restored
+automatically. That is the whole idea. Pure OS-level — no injection, no memory
+access, no packet editing. The interface ships in **English and Chinese** and you
+can switch it in-app.
 
 ![platform](https://img.shields.io/badge/platform-Windows-blue)
 ![python](https://img.shields.io/badge/python-3.8%2B-informational)
